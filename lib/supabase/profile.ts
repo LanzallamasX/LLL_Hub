@@ -1,7 +1,14 @@
 // lib/supabase/profile.ts
 import { supabase } from "@/lib/supabase/client";
 
+
 export type Role = "owner" | "user";
+
+export async function ensureMyProfileForAuth() {
+  const { data, error } = await supabase.rpc("ensure_my_profile");
+  if (error) throw error;
+  return data; // row de profiles
+}
 
 /** Lo que AuthContext necesita para hidratar sesión */
 export type ProfileAuth = {
@@ -85,6 +92,7 @@ export async function fetchMyProfileForAuth(): Promise<ProfileForAuth | null> {
   if (error) throw error;
   return data as ProfileForAuth;
 }
+
 
 
 /**
@@ -176,3 +184,4 @@ export async function updateMyProfile(input: UpdateMyProfileInput): Promise<Prof
     updated_at: p.updated_at ?? new Date().toISOString(),
   };
 }
+

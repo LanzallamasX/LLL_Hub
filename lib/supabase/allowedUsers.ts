@@ -2,6 +2,8 @@ import { supabase } from "@/lib/supabase/client";
 
 export type AllowedUserRole = "user" | "owner";
 
+
+
 export type AllowedUser = {
   id: number;
   email: string;

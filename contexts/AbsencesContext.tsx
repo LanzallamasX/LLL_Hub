@@ -20,6 +20,10 @@ import {
   deleteAbsence as dbDeleteAbsence, // ✅ NUEVO
 } from "@/lib/supabase/absences";
 
+import { buildDeductionFromAbsence } from "@/lib/absenceDeductions";
+
+
+
 type AbsencesContextValue = {
   absences: Absence[];
   isLoading: boolean;
@@ -116,13 +120,18 @@ export function AbsencesProvider({ children }: { children: React.ReactNode }) {
   const approveAbsence = useCallback(async (id: string) => {
     setError(null);
     try {
-      const updated = await dbApproveAbsence(id);
+      const absence = absences.find((a) => a.id === id);
+      if (!absence) throw new Error("No se encontró la ausencia en el estado.");
+
+      const deduction = buildDeductionFromAbsence(absence); // null si no descuenta
+      const updated = await dbApproveAbsence(id, deduction ?? undefined);
+
       setAbsences((prev) => prev.map((a) => (a.id === id ? updated : a)));
     } catch (e: any) {
       setError(e?.message ?? "Error aprobando solicitud.");
       throw e;
     }
-  }, []);
+  }, [absences]);
 
   const rejectAbsence = useCallback(async (id: string) => {
     setError(null);

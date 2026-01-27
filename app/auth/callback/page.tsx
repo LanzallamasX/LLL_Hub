@@ -8,12 +8,59 @@ export default function AuthCallbackPage() {
   const router = useRouter();
 
   useEffect(() => {
+    let cancelled = false;
 
-    // Con OTP, Supabase maneja el session exchange automáticamente en el cliente.
-    // Solo redirigimos a una ruta “post-login”.
-    supabase.auth.getSession().then(() => {
-      router.replace("/post-login");
-    });
+    async function run() {
+      try {
+        console.log("CALLBACK URL:", window.location.href);
+
+        const url = new URL(window.location.href);
+        const code = url.searchParams.get("code"); // <- NO dependemos de useSearchParams
+
+        console.log("CODE:", code);
+
+        if (!code) {
+          router.replace("/login?reason=missing_code");
+          return;
+        }
+
+        const { error: exErr } = await supabase.auth.exchangeCodeForSession(code);
+        console.log("EXCHANGE ERR:", exErr);
+
+        if (exErr) {
+          router.replace("/login?reason=exchange_failed");
+          return;
+        }
+
+        const { data: { session } } = await supabase.auth.getSession();
+        console.log("SESSION EMAIL:", session?.user?.email);
+
+        if (!session?.user) {
+          router.replace("/login?reason=no_session");
+          return;
+        }
+
+        const { error: ensureErr } = await supabase.rpc("ensure_my_profile");
+        console.log("ENSURE ERR:", ensureErr);
+
+        if (ensureErr) {
+          await supabase.auth.signOut();
+          router.replace("/login?reason=not_allowed");
+          return;
+        }
+
+        if (!cancelled) router.replace("/post-login");
+      } catch (e) {
+        console.log("CALLBACK ERROR:", e);
+        await supabase.auth.signOut();
+        router.replace("/login?reason=auth_error");
+      }
+    }
+
+    run();
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   return (
