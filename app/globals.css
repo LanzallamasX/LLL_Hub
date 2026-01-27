@@ -1,0 +1,21 @@
+@config "../tailwind.config.js";
+@import "tailwindcss";
+
+:root {
+  --lll-bg: #050816;
+  --lll-bg-soft: #0b1020;
+  --lll-bg-softer: #151a2c;
+  --lll-border: #23263a;
+
+  --lll-accent: #ff6b3d;
+  --lll-accent-soft: rgba(255, 107, 61, 0.15);
+  --lll-accent-alt: #26c6da;
+
+  --lll-text: #e5e7ff;
+  --lll-text-soft: #9aa0c2;
+}
+
+html,
+body {
+  height: 100%;
+}
