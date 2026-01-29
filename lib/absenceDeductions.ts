@@ -1,6 +1,6 @@
 // src/lib/absenceDeductions.ts
 import type { Absence } from "@/lib/supabase/absences";
-import { getPolicy, type AbsenceType, type LicenseSubtype } from "@/lib/absencePolicies";
+import { getPolicySafe, type AbsenceType, type LicenseSubtype } from "@/lib/absencePolicies";
 import type { BalanceKey, PolicyUnit } from "@/lib/absencePolicies";
 
 export type DeductionPayload = {
@@ -10,8 +10,8 @@ export type DeductionPayload = {
 };
 
 function daysBetweenInclusive(fromISO: string, toISO: string) {
-  const s = new Date(fromISO + "T00:00:00");
-  const e = new Date(toISO + "T00:00:00");
+  const s = new Date(`${fromISO}T00:00:00`);
+  const e = new Date(`${toISO}T00:00:00`);
 
   if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) {
     throw new Error("Fechas inválidas (from/to).");
@@ -21,31 +21,41 @@ function daysBetweenInclusive(fromISO: string, toISO: string) {
   }
 
   const ms = e.getTime() - s.getTime();
-  return Math.floor(ms / (1000 * 60 * 60 * 24)) + 1;
+  return Math.floor(ms / 86400000) + 1; // 1000*60*60*24
+}
+
+function parseSubtype(absence: Absence): LicenseSubtype | null {
+  // si en tu Absence ya tipás subtype como LicenseSubtype | null, esto se simplifica
+  const v = (absence as { subtype?: unknown }).subtype;
+  return typeof v === "string" ? (v as LicenseSubtype) : null;
 }
 
 export function buildDeductionFromAbsence(absence: Absence): DeductionPayload | null {
   const type = absence.type as unknown as AbsenceType;
-  const subtype = ((absence as any).subtype ?? null) as LicenseSubtype | null;
+  const subtype = type === "licencia" ? parseSubtype(absence) : null;
 
-  const policy = getPolicy({ type, subtype });
+  const policy = getPolicySafe({ type, subtype });
+  if (!policy) return null;
 
   if (!policy.deducts) return null;
+  if (!policy.deductsFrom) return null; // evita non-null assertion
 
-  const amount =
-    policy.unit === "day"
-      ? daysBetweenInclusive(absence.from, absence.to)
-      : (() => {
-          const h = Number((absence as any).hours);
-          if (!Number.isFinite(h) || h <= 0) {
-            throw new Error("Esta licencia requiere hours > 0.");
-          }
-          return h;
-        })();
+  let amount = 0;
+
+  if (policy.unit === "day") {
+    amount = daysBetweenInclusive(absence.from, absence.to);
+  } else {
+    const h = Number(absence.hours);
+    if (!Number.isFinite(h) || h <= 0) {
+      throw new Error("Esta licencia requiere hours > 0.");
+    }
+    amount = h;
+  }
 
   return {
-    balanceKey: policy.deductsFrom!,
+    balanceKey: policy.deductsFrom,
     unit: policy.unit,
     amount,
   };
 }
+

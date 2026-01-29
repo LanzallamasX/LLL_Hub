@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import UserLayout from "@/components/layout/UserLayout";
 import { useAuth } from "@/contexts/AuthContext";
 
+import { supabase } from "@/lib/supabase/client";
+
 import EditProfileModal, {
   type EditProfilePayload,
 } from "@/components/modals/EditProfileModal";
@@ -15,7 +17,7 @@ import {
   type AllowedUser,
   listAllowedUsers,
   createAllowedUser,
-  deleteAllowedUser, // NEW
+  deleteAllowedUser,
 } from "@/lib/supabase/allowedUsers";
 
 // SOURCE OF TRUTH (empleados reales)
@@ -30,10 +32,28 @@ function isValidEmail(email: string) {
   return email.trim().includes("@");
 }
 
+function getRowName(row: {
+  email: string;
+  full_name: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+}) {
+  const fn = (row.first_name ?? "").trim();
+  const ln = (row.last_name ?? "").trim();
+
+  if (fn || ln) return `${fn} ${ln}`.trim();
+
+  const legacy = (row.full_name ?? "").trim();
+  return legacy || row.email || "—";
+}
+
 type PersonRow = {
   key: string;
   email: string;
   full_name: string | null;
+
+  first_name: string | null;
+  last_name: string | null;
 
   allow: AllowedUser | null;
   profile: ProfileRow | null;
@@ -121,6 +141,11 @@ export default function OwnerUsersPage() {
         key: `au:${au.id}`,
         email: au.email,
         full_name: au.full_name ?? null,
+
+        // si todavía tu type AllowedUser no tiene first/last, lo leemos “soft”
+        first_name: (au as any).first_name ?? null,
+        last_name: (au as any).last_name ?? null,
+
         allow: au,
         profile: null,
         status: "pendiente",
@@ -135,12 +160,20 @@ export default function OwnerUsersPage() {
       if (existing) {
         existing.profile = p;
         existing.status = "registrado";
+
+        // prioridad: profile first/last si existen
+        existing.first_name = p.first_name ?? existing.first_name;
+        existing.last_name = p.last_name ?? existing.last_name;
+
+        // fallback legacy
         existing.full_name = p.full_name ?? existing.full_name;
       } else {
         byEmail.set(keyEmail || `id:${p.id}`, {
           key: `p:${p.id}`,
           email: p.email ?? "—",
           full_name: p.full_name ?? null,
+          first_name: p.first_name ?? null,
+          last_name: p.last_name ?? null,
           allow: null,
           profile: p,
           status: "sin_allowlist",
@@ -148,14 +181,14 @@ export default function OwnerUsersPage() {
       }
     }
 
-    // 3) filtro
+    // 3) filtro (🔧 ahora usa getRowName -> contempla first/last)
     const q = query.trim().toLowerCase();
     let list = Array.from(byEmail.values());
 
     if (q) {
       list = list.filter((row) => {
         const mail = (row.email ?? "").toLowerCase();
-        const name = (row.full_name ?? "").toLowerCase();
+        const name = getRowName(row).toLowerCase();
         const team = (row.profile?.team ?? row.allow?.team ?? "").toLowerCase();
         return mail.includes(q) || name.includes(q) || team.includes(q);
       });
@@ -249,104 +282,139 @@ export default function OwnerUsersPage() {
     }
   }
 
-  // NEW: eliminar (bloquear) persona: borra allowlist; si hay profile, lo desactiva
-async function handleDeletePerson(row: PersonRow) {
-  setError(null);
+  // ====== Eliminar definitivo ======
+  async function handleDeletePerson(row: PersonRow) {
+    setError(null);
 
-  const ok = window.confirm(
-    `⚠️ ELIMINAR DEFINITIVO: "${row.email}"\n\n` +
-      `Esto borrará el usuario de Auth.\n` +
-      `Por cascada se borrará su profile y sus ausencias/historial.\n\n` +
-      `Si querés conservar historial, usá "Archivar".\n\n` +
-      `¿Confirmás ELIMINAR?`
-  );
-  if (!ok) return;
+    const ok = window.confirm(
+      `⚠️ ELIMINAR DEFINITIVO: "${row.email}"\n\n` +
+        `Esto borrará el usuario de Auth.\n` +
+        `Por cascada se borrará su profile y sus ausencias/historial.\n\n` +
+        `Si querés conservar historial, usá "Archivar".\n\n` +
+        `¿Confirmás ELIMINAR?`
+    );
+    if (!ok) return;
 
-  try {
-    // Caso Pendiente: no existe profile/auth (todavía) => solo borrar allowlist
-    if (!row.profile?.id) {
-      if (row.allow?.id) {
-        await deleteAllowedUser(row.allow.id);
+    try {
+      // Caso Pendiente: no existe profile/auth (todavía) => solo borrar allowlist
+      if (!row.profile?.id) {
+        if (row.allow?.id) {
+          await deleteAllowedUser(row.allow.id);
+        }
+        await refresh();
+        return;
       }
+
+      // Caso Registrado: borrar de verdad via API (admin)
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      const token = session?.access_token;
+      if (!token) throw new Error("No session token");
+
+      const res = await fetch("/api/admin/delete-user", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          userId: row.profile.id,
+          email: row.email, // para limpiar allowlist en el server si existe
+        }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(json?.error ?? "No se pudo eliminar el usuario.");
+      }
+
       await refresh();
+    } catch (e: any) {
+      setError(e?.message ?? "Error eliminando usuario.");
+    }
+  }
+
+  // ====== Archivar y liberar email ======
+  async function archiveAndFreeEmail(row: PersonRow) {
+    setError(null);
+
+    if (!row.profile?.id || !row.profile?.email) {
+      setError(
+        "Solo se puede archivar un usuario que ya esté registrado (profile)."
+      );
       return;
     }
 
-    // Caso Registrado: borrar de verdad via API (admin)
-    const { supabase } = await import("@/lib/supabase/client");
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
+    const ok = window.confirm(
+      `¿Archivar y liberar email "${row.email}"?\n\n` +
+        `- Se desactivará el usuario\n` +
+        `- Se cambiará su email a un alias archived\n` +
+        `- Se eliminará su pre-alta (allowlist) si existiera\n\n` +
+        `Esto es irreversible.`
+    );
+    if (!ok) return;
 
-    const token = session?.access_token;
-    if (!token) throw new Error("No session token");
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-    const res = await fetch("/api/admin/delete-user", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        userId: row.profile.id,
-        email: row.email, // para limpiar allowlist en el server si existe
-      }),
-    });
+      const token = session?.access_token;
+      if (!token) throw new Error("No session token");
 
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(json?.error ?? "No se pudo eliminar el usuario.");
+      const res = await fetch("/api/admin/archive-user", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ userId: row.profile.id }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok)
+        throw new Error(json?.error ?? "No se pudo archivar el usuario.");
+
+      await refresh();
+    } catch (e: any) {
+      setError(e?.message ?? "Error archivando usuario.");
     }
-
-    await refresh();
-  } catch (e: any) {
-    setError(e?.message ?? "Error eliminando usuario.");
-  }
-}
-
-
-
-async function archiveAndFreeEmail(row: PersonRow) {
-  setError(null);
-
-  if (!row.profile?.id || !row.profile?.email) {
-    setError("Solo se puede archivar un usuario que ya esté registrado (profile).");
-    return;
   }
 
-  const ok = window.confirm(
-    `¿Archivar y liberar email "${row.email}"?\n\n` +
-      `- Se desactivará el usuario\n` +
-      `- Se cambiará su email a un alias archived\n` +
-      `- Se eliminará su pre-alta (allowlist) si existiera\n\n` +
-      `Esto es irreversible.`
-  );
-  if (!ok) return;
+  // ====== Enviar acceso (invite/recovery) ======
+  async function sendAccess(email: string) {
+    setError(null);
 
-  try {
-    const { data: { session } } = await (await import("@/lib/supabase/client")).supabase.auth.getSession();
-    const token = session?.access_token;
-    if (!token) throw new Error("No session token");
+    try {
+      const {
+        data: { session },
+        error: sessErr,
+      } = await supabase.auth.getSession();
 
-    const res = await fetch("/api/admin/archive-user", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ userId: row.profile.id }),
-    });
+      if (sessErr) throw sessErr;
 
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(json?.error ?? "No se pudo archivar el usuario.");
+      const token = session?.access_token;
+      if (!token) throw new Error("No session token");
 
-    await refresh();
-  } catch (e: any) {
-    setError(e?.message ?? "Error archivando usuario.");
+      const res = await fetch("/api/admin/send-access", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ email }),
+      });
+
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json?.error ?? "No se pudo enviar el acceso.");
+
+      alert("Acceso enviado. Revisar inbox/spam.");
+    } catch (e: any) {
+      setError(e?.message ?? "Error enviando acceso.");
+    }
   }
-}
-
-
 
   // Gates
   if (isLoading) {
@@ -492,12 +560,8 @@ async function archiveAndFreeEmail(row: PersonRow) {
           people.map((row) => {
             const p = row.profile;
 
-            const roleValue = (p?.role ??
-              row.allow?.role ??
-              "user") as ProfileRole;
-
+            const roleValue = (p?.role ?? row.allow?.role ?? "user") as ProfileRole;
             const isActiveValue = p?.active ?? row.allow?.is_active ?? true;
-
             const canEditProfile = Boolean(p);
 
             return (
@@ -508,16 +572,14 @@ async function archiveAndFreeEmail(row: PersonRow) {
                 <div className="col-span-4">{row.email}</div>
 
                 <div className="col-span-3 text-lll-text-soft">
-                  {row.full_name ?? "—"}
+                  {getRowName(row)}
                 </div>
 
                 <div className="col-span-2">
                   {canEditProfile ? (
                     <select
                       value={roleValue}
-                      onChange={(e) =>
-                        changeRole(p!, e.target.value as ProfileRole)
-                      }
+                      onChange={(e) => changeRole(p!, e.target.value as ProfileRole)}
                       className="w-full px-2 py-1 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm"
                     >
                       <option value="user">user</option>
@@ -581,6 +643,16 @@ async function archiveAndFreeEmail(row: PersonRow) {
                     </button>
                   )}
 
+                  {/* ✅ NEW: Enviar acceso (pendiente o registrado) */}
+                  <button
+                    onClick={() => sendAccess(row.email)}
+                    type="button"
+                    className="px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-sm text-lll-text-soft hover:text-lll-text"
+                    title="Envía invitación o recovery para que pueda acceder"
+                  >
+                    Enviar acceso
+                  </button>
+
                   {row.profile && (
                     <button
                       onClick={() => archiveAndFreeEmail(row)}
@@ -592,8 +664,6 @@ async function archiveAndFreeEmail(row: PersonRow) {
                     </button>
                   )}
 
-
-                  {/* NEW: Eliminar / Bloquear */}
                   <button
                     onClick={() => handleDeletePerson(row)}
                     type="button"

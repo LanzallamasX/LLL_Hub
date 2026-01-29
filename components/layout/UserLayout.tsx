@@ -3,9 +3,22 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import AppHeader from "@/components/ui/AppHeader";
-import { useAuth } from "@/contexts/AuthContext"; 
+import { useAuth } from "@/contexts/AuthContext";
 
 type LayoutMode = "user" | "owner";
+
+function getInitials(name: string, isLoading: boolean) {
+  if (isLoading) return "…";
+
+  const parts = name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2);
+
+  const initials = parts.map((w) => w[0]?.toUpperCase()).join("");
+  return initials || "U";
+}
 
 export default function UserLayout({
   children,
@@ -20,18 +33,11 @@ export default function UserLayout({
   };
 }) {
   const pathname = usePathname();
-  const { isLoading, isAuthed, fullName, email, role } = useAuth();
 
-    const displayName = isLoading
-    ? "…"
-    : fullName ?? email ?? "Usuario";
+  const { isLoading, isAuthed, displayName, role } = useAuth();
 
-    const initials = (displayName ?? "U")
-      .split(" ")
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((w) => w[0]?.toUpperCase())
-      .join("") || "U";    
+const name = isLoading ? "…" : displayName;
+const initials = getInitials(name, isLoading);
 
   function navLinkClass(active: boolean) {
     return active
@@ -53,12 +59,16 @@ export default function UserLayout({
       ? pathname === "/owner" || pathname.startsWith("/owner/dashboard")
       : pathname === "/dashboard" || pathname.startsWith("/dashboard");
 
-  const isCalendarActive = mode === "owner" && pathname.startsWith("/owner/calendar");
+  const isCalendarActive =
+    mode === "owner" && pathname.startsWith("/owner/calendar");
   const isUsersActive = mode === "owner" && pathname.startsWith("/owner/users");
-  const isMyAbsencesActive = mode === "user" && (pathname === "/absences" || pathname.startsWith("/absences"));
+  const isMyAbsencesActive =
+    mode === "user" &&
+    (pathname === "/absences" || pathname.startsWith("/absences"));
 
   const isProfileActive = pathname === "/profile" || pathname.startsWith("/profile");
-  const isSettingsActive = pathname === "/settings" || pathname.startsWith("/settings");
+  const isSettingsActive =
+    pathname === "/settings" || pathname.startsWith("/settings");
 
   return (
     <div className="min-h-screen flex bg-lll-bg text-lll-text">
@@ -89,7 +99,10 @@ export default function UserLayout({
 
           {/* USER: Mis ausencias */}
           {mode === "user" && (
-            <Link href={myAbsencesHref} className={navLinkClass(isMyAbsencesActive)}>
+            <Link
+              href={myAbsencesHref}
+              className={navLinkClass(isMyAbsencesActive)}
+            >
               <span className="w-2 h-2 rounded bg-lll-accent-alt" />
               Mis ausencias
             </Link>
@@ -99,7 +112,10 @@ export default function UserLayout({
           {mode === "owner" && (
             <>
               <div className="mt-2">
-                <Link href={calendarHref} className={navLinkClass(isCalendarActive)}>
+                <Link
+                  href={calendarHref}
+                  className={navLinkClass(isCalendarActive)}
+                >
                   <span className="w-2 h-2 rounded bg-lll-accent" />
                   Calendario
                 </Link>
@@ -127,10 +143,10 @@ export default function UserLayout({
           </Link>
         </nav>
 
-        {/* ✅ Bottom user conectado a AuthContext */}
+        {/* Bottom user conectado a AuthContext */}
         <div className="mt-auto flex items-center justify-between gap-3 border-t border-lll-border pt-4">
           <div className="min-w-0">
-            <p className="text-sm font-medium truncate">{displayName}</p>
+            <p className="text-sm font-medium truncate">{name}</p>
             <p className="text-[12px] text-lll-text-soft capitalize">
               {isAuthed ? role : "no-auth"}
             </p>

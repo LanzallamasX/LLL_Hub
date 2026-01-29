@@ -13,6 +13,9 @@ import { useAuth } from "@/contexts/AuthContext";
 
 import type { Absence } from "@/lib/supabase/absences";
 
+//para mostrar ausencias usadas
+import { computeUsageByBalanceKey } from "@/lib/balances/usage";
+
 type Filter = "todas" | "pendiente" | "aprobado" | "rechazado";
 
 export default function MyAbsencesPage() {
@@ -81,6 +84,13 @@ export default function MyAbsencesPage() {
     return [...items].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [myAbsences, filter, query]);
 
+
+    // para ausencias usadas
+const usageByKey = useMemo(() => {
+  const y = new Date().getFullYear();
+  return computeUsageByBalanceKey(myAbsences, y);
+}, [myAbsences]);
+
   function openCreate() {
     setEditing(null);
     setIsModalOpen(true);
@@ -96,36 +106,43 @@ export default function MyAbsencesPage() {
     setEditing(null);
   }
 
-  async function handleSubmit(payload: NewAbsencePayload) {
-    if (editing) {
-      if (editing.status !== "pendiente") {
-        closeModal();
-        return;
-      }
-
-      await updateAbsence(editing.id, {
-        from: payload.from,
-        to: payload.to,
-        type: payload.type,
-        note: payload.note,
-      });
-
+async function handleSubmit(payload: NewAbsencePayload) {
+  if (editing) {
+    if (editing.status !== "pendiente") {
       closeModal();
       return;
     }
 
-    await createAbsence({
-      userId: currentUser.userId,
-      userName: currentUser.userName,
+    await updateAbsence(editing.id, {
       from: payload.from,
       to: payload.to,
       type: payload.type,
       note: payload.note,
+
+      // ✅ NUEVO
+      subtype: payload.subtype ?? null,
+      hours: payload.hours ?? null,
     });
 
     closeModal();
+    return;
   }
 
+  await createAbsence({
+    userId: currentUser.userId,
+    userName: currentUser.userName,
+    from: payload.from,
+    to: payload.to,
+    type: payload.type,
+    note: payload.note,
+
+    // ✅ NUEVO
+    subtype: payload.subtype ?? null,
+    hours: payload.hours ?? null,
+  });
+
+  closeModal();
+}
   // Gates
   if (isLoading) {
     return (
@@ -214,11 +231,23 @@ export default function MyAbsencesPage() {
         onClose={closeModal}
         onSubmit={handleSubmit}
         initial={
-          editing ? { from: editing.from, to: editing.to, type: editing.type, note: editing.note ?? "" } : undefined
+          editing
+            ? {
+                from: editing.from,
+                to: editing.to,
+                type: editing.type,
+                note: editing.note ?? "",
+
+                // ✅ NUEVO
+                subtype: editing.subtype ?? null,
+                hours: editing.hours ?? null,
+              }
+            : undefined
         }
         submitLabel={editing ? "Guardar cambios" : "Enviar"}
         title={editing ? "Editar solicitud" : "Nueva solicitud"}
         subtitle={editing ? "Podés editar mientras esté pendiente." : "Completá los datos y enviá la solicitud."}
+        usageByKey={usageByKey}
       />
     </UserLayout>
   );

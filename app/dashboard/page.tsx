@@ -18,6 +18,15 @@ import type { Absence } from "@/lib/supabase/absences";
 import { computeVacationBalance } from "@/lib/vacations/calc";
 import { DEFAULT_VACATION_SETTINGS } from "@/lib/vacations/settings";
 
+//para mostrar ausencias usadas
+import { computeUsageByBalanceKey } from "@/lib/balances/usage";
+
+//grafico de ausencias usadas
+import BalancesSummary from "./BalancesSummary";
+
+
+
+
 export default function DashboardPage() {
   const router = useRouter();
 
@@ -102,6 +111,14 @@ export default function DashboardPage() {
     return upcoming[0]?.a ?? null;
   }, [myAbsences]);
 
+
+  // para ausencias usadas
+const usageByKey = useMemo(() => {
+  const y = new Date().getFullYear();
+  return computeUsageByBalanceKey(myAbsences, y);
+}, [myAbsences]);
+
+
   // Gates
   if (isLoading) {
     return (
@@ -152,35 +169,43 @@ export default function DashboardPage() {
     setEditing(null);
   }
 
-  async function handleSubmit(payload: NewAbsencePayload) {
-    if (editing) {
-      if (editing.status !== "pendiente") {
-        closeModal();
-        return;
-      }
-
-      await updateAbsence(editing.id, {
-        from: payload.from,
-        to: payload.to,
-        type: payload.type,
-        note: payload.note,
-      });
-
+async function handleSubmit(payload: NewAbsencePayload) {
+  if (editing) {
+    if (editing.status !== "pendiente") {
       closeModal();
       return;
     }
 
-    await createAbsence({
-      userId: currentUser.userId,
-      userName: currentUser.userName,
+    await updateAbsence(editing.id, {
       from: payload.from,
       to: payload.to,
       type: payload.type,
       note: payload.note,
+
+      // ✅ NUEVO
+      subtype: payload.subtype ?? null,
+      hours: payload.hours ?? null,
     });
 
     closeModal();
+    return;
   }
+
+  await createAbsence({
+    userId: currentUser.userId,
+    userName: currentUser.userName,
+    from: payload.from,
+    to: payload.to,
+    type: payload.type,
+    note: payload.note,
+
+    // ✅ NUEVO
+    subtype: payload.subtype ?? null,
+    hours: payload.hours ?? null,
+  });
+
+  closeModal();
+}
 
   return (
     <UserLayout mode="user" header={{ title: "Dashboard", subtitle: "Solicitudes, calendario e historial." }}>
@@ -248,6 +273,13 @@ export default function DashboardPage() {
           </div>
 
           <AbsenceList absences={myAbsences} onEdit={openEdit} />
+
+          <BalancesSummary
+  usageByKey={usageByKey}
+  vacationAvailable={vacationBalance.available}
+  vacationAllowance={vacationBalance.entitlement + vacationBalance.carryover}
+/>
+          
         </div>
 
         <CalendarMonth
@@ -264,15 +296,28 @@ export default function DashboardPage() {
         open={isModalOpen}
         onClose={closeModal}
         onSubmit={handleSubmit}
-        vacationAvailable={vacationBalance.available}   
+
         initial={
           editing
-            ? { from: editing.from, to: editing.to, type: editing.type, note: editing.note ?? "" }
+            ? {
+                from: editing.from,
+                to: editing.to,
+                type: editing.type,
+                note: editing.note ?? "",
+
+                // ✅ NUEVO
+                subtype: editing.subtype ?? null,
+                hours: editing.hours ?? null,
+                
+              }
             : undefined
         }
         submitLabel={editing ? "Guardar cambios" : "Enviar"}
         title={editing ? "Editar solicitud" : "Nueva solicitud"}
         subtitle={editing ? "Podés editar mientras esté pendiente." : "MVP visual. Luego lo conectamos al backend."}
+          vacationInfo={vacationBalance}
+          vacationAvailable={vacationBalance.available} // opcional (por compat)
+        usageByKey={usageByKey}
       />
 
 

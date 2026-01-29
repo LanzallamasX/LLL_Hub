@@ -3,6 +3,7 @@ export type PolicyUnit = "day" | "hour";
 
 export type BalanceKey =
   | "VACATION_DAYS"
+  | "HOME_OFFICE_DAYS"        // ✅ NUEVO
   | "BIRTHDAY_DAY"
   | "LIC_FAMILY_CARE_DAYS"
   | "LIC_EXAMS_DAYS"
@@ -49,14 +50,13 @@ export const POLICIES: Policy[] = [
   // --- AUSENCIAS POR DÍAS ---
   { key: "VACACIONES", type: "vacaciones", unit: "day", allowance: null, deducts: true, deductsFrom: "VACATION_DAYS" },
 
-  { key: "HOME_OFFICE", type: "home_office", unit: "day", allowance: null, deducts: false },
+  // ✅ Home Office con cupo anual
+  { key: "HOME_OFFICE", type: "home_office", unit: "day", allowance: 15, deducts: true, deductsFrom: "HOME_OFFICE_DAYS" },
 
-  // Cumple “simple” como ausencia (si querés tenerlo como option en el selector)
   { key: "CUMPLE", type: "cumple", unit: "day", allowance: 1, deducts: true, deductsFrom: "BIRTHDAY_DAY" },
-
   { key: "ENFERMEDAD", type: "enfermedad", unit: "day", allowance: null, deducts: false },
 
-  // --- LICENCIAS (subtipos) ---
+  // --- LICENCIAS ---
   { key: "LIC_FAMILY_CARE", type: "licencia", subtype: "ATENCION_GRUPO_FAMILIAR", unit: "day", allowance: 20, deducts: true, deductsFrom: "LIC_FAMILY_CARE_DAYS" },
   { key: "LIC_BDAY_FREE", type: "licencia", subtype: "CUMPLEANIOS_LIBRE", unit: "day", allowance: 1, deducts: true, deductsFrom: "BIRTHDAY_DAY" },
   { key: "LIC_EXAMS", type: "licencia", subtype: "EXAMEN", unit: "day", allowance: 10, deducts: true, deductsFrom: "LIC_EXAMS_DAYS" },
@@ -70,10 +70,11 @@ export const POLICIES: Policy[] = [
   { key: "LIC_MEDICAL", type: "licencia", subtype: "TURNO_MEDICO", unit: "hour", allowance: 6, deducts: true, deductsFrom: "LIC_MEDICAL_APPT_HOURS" },
 ];
 
-export function getPolicy(input: { type: AbsenceType; subtype?: LicenseSubtype | null }) {
-  const p = POLICIES.find(
+export function getPolicySafe(input: { type: AbsenceType; subtype?: LicenseSubtype | null }) {
+  return POLICIES.find(
     (x) => x.type === input.type && (input.type !== "licencia" ? true : x.subtype === input.subtype)
-  );
-  if (!p) throw new Error(`Policy not found for type=${input.type} subtype=${input.subtype}`);
-  return p;
+  ) ?? null;
 }
+
+
+export const getPolicy = getPolicySafe;

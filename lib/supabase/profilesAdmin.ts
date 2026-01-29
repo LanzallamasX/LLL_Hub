@@ -6,21 +6,48 @@ export type ProfileRole = "user" | "owner";
 export type ProfileRow = {
   id: string;
   email: string | null;
-  full_name: string | null;
-  role: ProfileRole;
 
+  full_name: string | null;
+  first_name: string | null;
+  last_name: string | null;
+
+  dni: string | null;
+  job_title: string | null;
+
+  role: ProfileRole;
   active: boolean;
 
   team: string | null;
-  start_date: string | null; // YYYY-MM-DD
+  start_date: string | null;
   annual_vacation_days: number;
+
+  blood_type: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_phone: string | null;
 
   created_at: string;
   updated_at: string;
 };
 
-const PROFILES_SELECT =
-  "id,email,full_name,role,active,team,start_date,annual_vacation_days,created_at,updated_at";
+const PROFILES_SELECT = `
+  id,
+  email,
+  full_name,
+  first_name,
+  last_name,
+  dni,
+  job_title,
+  team,
+  start_date,
+  blood_type,
+  emergency_contact_name,
+  emergency_contact_phone,
+  role,
+  active,
+  annual_vacation_days,
+  created_at,
+  updated_at
+`.replace(/\s+/g, " ").trim();
 
 export async function listProfiles(): Promise<ProfileRow[]> {
   const { data, error } = await supabase
@@ -38,7 +65,19 @@ export async function updateProfile(
   patch: Partial<
     Pick<
       ProfileRow,
-      "full_name" | "role" | "active" | "team" | "start_date" | "annual_vacation_days"
+      | "first_name"
+      | "last_name"
+      | "full_name"
+      | "dni"
+      | "job_title"
+      | "team"
+      | "start_date"
+      | "blood_type"
+      | "emergency_contact_name"
+      | "emergency_contact_phone"
+      | "role"
+      | "active"
+      | "annual_vacation_days"
     >
   >
 ): Promise<ProfileRow> {

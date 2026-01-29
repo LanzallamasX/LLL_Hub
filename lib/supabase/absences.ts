@@ -214,7 +214,7 @@ export async function updateAbsence(
     .from("absences")
     .update({
       date_from: input.from,
-      date_to: input.to,
+      date_to: input.to, 
       type: input.type,
       note: input.note?.trim() ? input.note.trim() : null,
       subtype: input.subtype ?? null,

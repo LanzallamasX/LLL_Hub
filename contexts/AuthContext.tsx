@@ -2,16 +2,59 @@
 
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
-
-// Ojo: si no lo usás, podés borrar este import
-// import { fetchMyProfile } from "@/lib/supabase/profile";
-
-import {
-  fetchMyProfileForAuth,
-  ensureMyProfileForAuth,
-} from "@/lib/supabase/profile";
+import { ensureMyProfileForAuth } from "@/lib/supabase/profile";
 
 type Role = "owner" | "user";
+
+/**
+ * Perfil "lite" (lo mínimo para hidratar UI).
+ * Alineado con public.profiles.
+ */
+type ProfileLite = {
+  id: string;
+  email: string | null;
+
+  role: Role;
+
+  // legacy compat
+  full_name: string | null;
+
+  // normalizado
+  first_name: string | null;
+  last_name: string | null;
+
+  // RRHH
+  team: string | null;
+  start_date: string | null; // YYYY-MM-DD
+
+  // legacy compat
+  annual_vacation_days: number; // ✅ siempre number (default 10)
+
+  active: boolean; // ✅ siempre boolean (default true)
+};
+
+function toStr(v: unknown): string {
+  return typeof v === "string" ? v : "";
+}
+
+function normalizeRole(v: unknown): Role {
+  return v === "owner" ? "owner" : "user";
+}
+
+function buildDisplayName(
+  profile: Partial<ProfileLite> | null,
+  email: string | null
+): string {
+  const fn = toStr(profile?.first_name).trim();
+  const ln = toStr(profile?.last_name).trim();
+  const full = `${fn} ${ln}`.trim();
+  if (full) return full;
+
+  const legacy = toStr(profile?.full_name).trim();
+  if (legacy) return legacy;
+
+  return email ?? "Usuario";
+}
 
 type AuthState = {
   isLoading: boolean;
@@ -21,14 +64,20 @@ type AuthState = {
   email: string | null;
 
   role: Role;
-  fullName: string | null;
 
+  // ✅ source of truth para UI (lo que viene de DB)
+  profile: ProfileLite | null;
+
+  // ✅ derivado (usar en Header/Aside)
+  displayName: string;
+
+  // legacy / compat (para no romper pantallas existentes)
+  fullName: string | null;
   startDate: string | null;
   annualVacationDays: number | null;
 };
 
 type AuthContextValue = AuthState & {
-  // (lo dejo por compatibilidad; podés sacarlo del login cuando migres 100%)
   signInWithMagicLink: (
     email: string
   ) => Promise<{ ok: boolean; error?: string }>;
@@ -44,9 +93,7 @@ type AuthContextValue = AuthState & {
     fullName?: string
   ) => Promise<{ ok: boolean; error?: string }>;
 
-  resetPassword: (
-    email: string
-  ) => Promise<{ ok: boolean; error?: string }>;
+  resetPassword: (email: string) => Promise<{ ok: boolean; error?: string }>;
 
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
@@ -61,18 +108,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     userId: null,
     email: null,
     role: "user",
+
+    profile: null,
+    displayName: "Usuario",
+
     fullName: null,
     startDate: null,
     annualVacationDays: null,
   });
 
-  async function setLoggedOutState() {
+  function setLoggedOutState() {
     setState({
       isLoading: false,
       isAuthed: false,
       userId: null,
       email: null,
       role: "user",
+
+      profile: null,
+      displayName: "Usuario",
+
       fullName: null,
       startDate: null,
       annualVacationDays: null,
@@ -85,30 +140,74 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } = await supabase.auth.getSession();
 
     if (!session?.user) {
-      await setLoggedOutState();
+      setLoggedOutState();
       return;
     }
 
+    const email = session.user.email ?? null;
+
     try {
-      // Gate definitivo:
-      // - valida allowlist (NOT_ALLOWED / NOT_ACTIVE)
-      // - asegura/crea profile si corresponde
-      const profile = await ensureMyProfileForAuth();
+      // Gate definitivo (allowlist + crea/asegura profile)
+      const raw = (await ensureMyProfileForAuth()) as any;
+
+      if (!raw) {
+        // Si por alguna razón RPC devuelve null, tratamos como no permitido.
+        await supabase.auth.signOut();
+        setLoggedOutState();
+        return;
+      }
+
+      // Normalizamos shape (por filas viejas / nulls)
+      const normalized: ProfileLite = {
+        id: raw.id ?? session.user.id,
+        email: raw.email ?? email,
+
+        role: normalizeRole(raw.role),
+
+        full_name: raw.full_name ?? null,
+        first_name: raw.first_name ?? null,
+        last_name: raw.last_name ?? null,
+
+        team: raw.team ?? null,
+        start_date: raw.start_date ?? null,
+
+        annual_vacation_days:
+          typeof raw.annual_vacation_days === "number"
+            ? raw.annual_vacation_days
+            : 10,
+
+        active: typeof raw.active === "boolean" ? raw.active : true,
+      };
+
+      // ✅ Si está desactivado => logout
+      if (!normalized.active) {
+        await supabase.auth.signOut();
+        setLoggedOutState();
+        return;
+      }
+
+      const displayName = buildDisplayName(normalized, email);
 
       setState({
         isLoading: false,
         isAuthed: true,
         userId: session.user.id,
-        email: session.user.email ?? null,
-        role: (profile?.role as Role) ?? "user",
-        fullName: profile?.full_name ?? (session.user.email ?? null),
-        startDate: profile?.start_date ?? null,
-        annualVacationDays: profile?.annual_vacation_days ?? null,
+        email,
+
+        role: normalized.role,
+
+        profile: normalized,
+        displayName,
+
+        // compat
+        fullName: displayName,
+        startDate: normalized.start_date ?? null,
+        annualVacationDays: normalized.annual_vacation_days ?? null,
       });
-    } catch (e: any) {
-      // Si no está allowlisted o está inactive => lo deslogueamos
+    } catch {
+      // NOT_ALLOWED / NOT_ACTIVE / errors => logout
       await supabase.auth.signOut();
-      await setLoggedOutState();
+      setLoggedOutState();
     }
   }
 
@@ -124,7 +223,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // =========================
-  // MAGIC LINK (legacy / opcional)
+  // MAGIC LINK
   // =========================
   async function signInWithMagicLink(email: string) {
     try {
@@ -154,8 +253,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email: e,
         password,
       });
-
       if (error) return { ok: false, error: error.message };
+
       return { ok: true };
     } catch {
       return {
@@ -173,7 +272,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const e = email.trim().toLowerCase();
 
-      // 1) precheck allowlist (antes de crear auth user)
+      // 1) precheck allowlist
       const { data: allowed, error: allowedErr } = await supabase.rpc(
         "is_email_allowed",
         { p_email: e }
@@ -193,18 +292,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         options: {
           emailRedirectTo: `${window.location.origin}/auth/callback`,
           data: {
+            // legacy compat (si después querés, mandamos first/last desde el form)
             full_name: fullName?.trim() || undefined,
           },
         },
       });
 
       if (error) return { ok: false, error: error.message };
-
-      // OJO:
-      // - Si tu proyecto requiere confirmación de email,
-      //   acá no hay sesión todavía y el user debe confirmar.
-      // - Si no requiere confirmación, onAuthStateChange hidrata y listo.
-
       return { ok: true };
     } catch {
       return { ok: false, error: "No se pudo crear la cuenta. Probá de nuevo." };
@@ -226,7 +320,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   async function signOut() {
     await supabase.auth.signOut();
-    await setLoggedOutState();
+    setLoggedOutState();
   }
 
   async function refreshProfile() {
@@ -236,13 +330,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const value: AuthContextValue = {
     ...state,
 
-    // auth methods
     signInWithMagicLink,
     signInWithPassword,
     signUpWithPassword,
     resetPassword,
 
-    // session helpers
     signOut,
     refreshProfile,
   };
