@@ -26,18 +26,20 @@ export default function UserLayout({
   header,
 }: {
   children: React.ReactNode;
-  mode: LayoutMode;
+  mode: LayoutMode; // lo dejamos por compatibilidad
   header?: {
     title: string;
     subtitle?: string;
   };
 }) {
   const pathname = usePathname();
-
   const { isLoading, isAuthed, displayName, role } = useAuth();
 
-const name = isLoading ? "…" : displayName;
-const initials = getInitials(name, isLoading);
+  // ✅ El menú no depende del pathname ni del prop, depende del rol real
+  const effectiveMode: LayoutMode = role === "owner" ? "owner" : "user";
+
+  const name = isLoading ? "…" : displayName;
+  const initials = getInitials(name, isLoading);
 
   function navLinkClass(active: boolean) {
     return active
@@ -46,29 +48,36 @@ const initials = getInitials(name, isLoading);
   }
 
   // ====== ROUTES ======
-  const dashboardHref = mode === "owner" ? "/owner/dashboard" : "/dashboard";
+  const dashboardHref = effectiveMode === "owner" ? "/owner/dashboard" : "/dashboard";
   const calendarHref = "/owner/calendar";
   const usersHref = "/owner/users";
+
   const myAbsencesHref = "/absences";
   const profileHref = "/profile";
   const settingsHref = "/settings";
 
+  // Balances
+  const myBalancesHref = "/balances";
+  const ownerBalancesEmployeesHref = "/owner/balances/employees";
+
   // ====== ACTIVE STATES ======
   const isDashboardActive =
-    mode === "owner"
+    effectiveMode === "owner"
       ? pathname === "/owner" || pathname.startsWith("/owner/dashboard")
       : pathname === "/dashboard" || pathname.startsWith("/dashboard");
 
-  const isCalendarActive =
-    mode === "owner" && pathname.startsWith("/owner/calendar");
-  const isUsersActive = mode === "owner" && pathname.startsWith("/owner/users");
-  const isMyAbsencesActive =
-    mode === "user" &&
-    (pathname === "/absences" || pathname.startsWith("/absences"));
+  const isCalendarActive = effectiveMode === "owner" && pathname.startsWith("/owner/calendar");
+  const isUsersActive = effectiveMode === "owner" && pathname.startsWith("/owner/users");
+
+  // ✅ ahora aplica para ambos roles (user + owner)
+  const isMyAbsencesActive = pathname === "/absences" || pathname.startsWith("/absences");
 
   const isProfileActive = pathname === "/profile" || pathname.startsWith("/profile");
-  const isSettingsActive =
-    pathname === "/settings" || pathname.startsWith("/settings");
+  const isSettingsActive = pathname === "/settings" || pathname.startsWith("/settings");
+
+  const isMyBalancesActive = pathname === "/balances" || pathname.startsWith("/balances");
+  const isOwnerBalancesEmployeesActive =
+    effectiveMode === "owner" && pathname.startsWith("/owner/balances/employees");
 
   return (
     <div className="min-h-screen flex bg-lll-bg text-lll-text">
@@ -94,28 +103,43 @@ const initials = getInitials(name, isLoading);
           {/* DASHBOARD / SOLICITUDES */}
           <Link href={dashboardHref} className={navLinkClass(isDashboardActive)}>
             <span className="w-2 h-2 rounded bg-lll-accent" />
-            {mode === "owner" ? "Solicitudes" : "Dashboard"}
+            {effectiveMode === "owner" ? "Solicitudes" : "Dashboard"}
           </Link>
 
-          {/* USER: Mis ausencias */}
-          {mode === "user" && (
-            <Link
-              href={myAbsencesHref}
-              className={navLinkClass(isMyAbsencesActive)}
-            >
-              <span className="w-2 h-2 rounded bg-lll-accent-alt" />
-              Mis ausencias
+          {/* BALANCES */}
+          {effectiveMode === "owner" ? (
+            <>
+              <Link href={myBalancesHref} className={navLinkClass(isMyBalancesActive)}>
+                <span className="w-2 h-2 rounded bg-emerald-400" />
+                Mis balances
+              </Link>
+
+              <Link
+                href={ownerBalancesEmployeesHref}
+                className={navLinkClass(isOwnerBalancesEmployeesActive)}
+              >
+                <span className="w-2 h-2 rounded bg-sky-400" />
+                Balances por empleado
+              </Link>
+            </>
+          ) : (
+            <Link href={myBalancesHref} className={navLinkClass(isMyBalancesActive)}>
+              <span className="w-2 h-2 rounded bg-emerald-400" />
+              Balances
             </Link>
           )}
 
+          {/* ✅ Mis ausencias (ahora también para owner) */}
+          <Link href={myAbsencesHref} className={navLinkClass(isMyAbsencesActive)}>
+            <span className="w-2 h-2 rounded bg-lll-accent-alt" />
+            Mis ausencias
+          </Link>
+
           {/* OWNER: Calendario + Usuarios */}
-          {mode === "owner" && (
+          {effectiveMode === "owner" && (
             <>
               <div className="mt-2">
-                <Link
-                  href={calendarHref}
-                  className={navLinkClass(isCalendarActive)}
-                >
+                <Link href={calendarHref} className={navLinkClass(isCalendarActive)}>
                   <span className="w-2 h-2 rounded bg-lll-accent" />
                   Calendario
                 </Link>
@@ -143,7 +167,7 @@ const initials = getInitials(name, isLoading);
           </Link>
         </nav>
 
-        {/* Bottom user conectado a AuthContext */}
+        {/* Bottom user */}
         <div className="mt-auto flex items-center justify-between gap-3 border-t border-lll-border pt-4">
           <div className="min-w-0">
             <p className="text-sm font-medium truncate">{name}</p>
@@ -163,20 +187,18 @@ const initials = getInitials(name, isLoading);
         {/* Topbar */}
         <header className="border-b border-lll-border bg-lll-bg-soft">
           <div className="px-4 py-3 flex items-center justify-between gap-3">
-            {/* Left label / breadcrumb */}
             <div className="flex items-center gap-3 min-w-0">
               <p className="text-sm text-lll-text-soft whitespace-nowrap">LLL HUB</p>
               <span className="text-lll-text-soft/60">·</span>
               <p className="text-sm truncate">{header?.title ?? "LLL Hub"}</p>
 
               <span className="ml-2 text-[12px] px-2 py-1 rounded-full bg-lll-bg-softer border border-lll-border">
-                {mode === "owner" ? "Owner" : "Usuario"}
+                {effectiveMode === "owner" ? "Owner" : "Usuario"}
               </span>
             </div>
 
-            {/* Right side */}
             <div className="flex items-center gap-3">
-              {mode === "owner" && (
+              {effectiveMode === "owner" && (
                 <input
                   className="hidden lg:block w-[340px] px-3 py-2 rounded-full bg-lll-bg-softer border border-lll-border text-sm placeholder:text-lll-text-soft outline-none"
                   placeholder="Buscar empleado o equipo..."

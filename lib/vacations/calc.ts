@@ -1,6 +1,10 @@
 // lib/vacations/calc.ts
 import type { AbsenceTypeId } from "@/lib/absenceTypes";
-import { DEFAULT_ENTITLEMENT_RULES, entitlementDaysForYears, yearsOfServiceAtYearEnd } from "./policy";
+import {
+  DEFAULT_ENTITLEMENT_RULES,
+  entitlementDaysForYears,
+  yearsOfServiceAtYearEnd,
+} from "./policy";
 import { clampRangeToYear, countChargeableDays, type CountMode } from "./dateCount";
 
 export type AbsenceLite = {
@@ -11,39 +15,42 @@ export type AbsenceLite = {
 };
 
 export type VacationSettings = {
-  countMode: CountMode;              // business_days (no sab/dom) o calendar_days
+  countMode: CountMode;
   carryoverEnabled: boolean;
-  carryoverMaxCycles: number | null; // ej 3
+  carryoverMaxCycles: number | null;
 };
 
-export function usedVacationDaysInYear(
+function vacationDaysInYearByStatus(
   absences: AbsenceLite[],
   year: number,
-  countMode: CountMode
+  countMode: CountMode,
+  status: "aprobado" | "pendiente"
 ) {
-  const vacationsApproved = absences.filter(
-    (a) => a.status === "aprobado" && a.type === "vacaciones"
-  );
+  const list = absences.filter((a) => a.type === "vacaciones" && a.status === status);
 
   let total = 0;
-
-  for (const a of vacationsApproved) {
+  for (const a of list) {
     const clamped = clampRangeToYear(a.from, a.to, year);
     if (!clamped) continue;
     total += countChargeableDays(clamped.fromISO, clamped.toISO, countMode);
   }
-
   return total;
 }
 
-export function entitlementForYear(params: {
-  year: number;
-  startDateISO: string | null; // profile.start_date
-}) {
-  // Si no hay start_date, asumimos 0 años (14 días) para no romper UI.
-  // Podés cambiar a 0 si preferís bloquear.
+export function usedVacationDaysInYear(absences: AbsenceLite[], year: number, countMode: CountMode) {
+  return vacationDaysInYearByStatus(absences, year, countMode, "aprobado");
+}
+
+export function reservedVacationDaysInYear(absences: AbsenceLite[], year: number, countMode: CountMode) {
+  return vacationDaysInYearByStatus(absences, year, countMode, "pendiente");
+}
+
+export function entitlementForYear(params: { year: number; startDateISO: string | null }) {
   const start = params.startDateISO;
+
+  // Si no hay start_date, asumimos 0 años (14 días) para no romper UI.
   const years = start ? yearsOfServiceAtYearEnd(params.year, start) : 0;
+
   return entitlementDaysForYears(years, DEFAULT_ENTITLEMENT_RULES);
 }
 
@@ -56,9 +63,13 @@ export function computeVacationBalance(params: {
   const { absences, currentYear, startDateISO, settings } = params;
 
   const entitlement = entitlementForYear({ year: currentYear, startDateISO });
+
   const usedThisYear = usedVacationDaysInYear(absences, currentYear, settings.countMode);
+  const reservedThisYear = reservedVacationDaysInYear(absences, currentYear, settings.countMode);
 
   let carryover = 0;
+
+  // carryover: solo consumido real (aprobado)
   if (settings.carryoverEnabled) {
     const max = settings.carryoverMaxCycles ?? 50;
 
@@ -70,12 +81,13 @@ export function computeVacationBalance(params: {
     }
   }
 
-  const available = Math.max(0, entitlement + carryover - usedThisYear);
+  const available = Math.max(0, entitlement + carryover - usedThisYear - reservedThisYear);
 
   return {
     entitlement,
     carryover,
     usedThisYear,
+    reservedThisYear,
     available,
   };
 }

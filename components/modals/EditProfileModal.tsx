@@ -7,13 +7,13 @@ export type EditProfilePayload = {
   // identidad
   first_name?: string | null;
   last_name?: string | null;
-  full_name?: string | null; // legacy compat
+  full_name?: string | null;
 
   // RRHH
   dni?: string | null;
   job_title?: string | null;
   team?: string | null;
-  start_date?: string | null; // YYYY-MM-DD
+  start_date?: string | null; // YYYY-MM-DD (solo si cambia)
 
   // salud / emergencia
   blood_type?: string | null;
@@ -24,7 +24,7 @@ export type EditProfilePayload = {
   role?: ProfileRole;
   active?: boolean;
 
-  // legacy (lo vamos a deprecar)
+  // legacy
   annual_vacation_days?: number;
 };
 
@@ -59,6 +59,9 @@ export default function EditProfileModal({
   const [team, setTeam] = useState("");
   const [startDate, setStartDate] = useState("");
 
+  // ✅ IMPORTANTE: guardamos el valor original para no pisar si no cambió
+  const [initialStartDate, setInitialStartDate] = useState("");
+
   // ✅ Salud / emergencia
   const [bloodType, setBloodType] = useState("");
   const [emergencyName, setEmergencyName] = useState("");
@@ -81,7 +84,6 @@ export default function EditProfileModal({
   useEffect(() => {
     if (!open || !user) return;
 
-    // ✅ Preferimos first/last reales si existen
     const fn = (user.first_name ?? "").trim();
     const ln = (user.last_name ?? "").trim();
 
@@ -89,7 +91,6 @@ export default function EditProfileModal({
       setFirstName(fn);
       setLastName(ln);
     } else {
-      // fallback legacy
       const s = splitFullName(user.full_name);
       setFirstName(s.firstName);
       setLastName(s.lastName);
@@ -98,7 +99,10 @@ export default function EditProfileModal({
     setDni(user.dni ?? "");
     setJobTitle(user.job_title ?? "");
     setTeam(user.team ?? "");
-    setStartDate(user.start_date ?? "");
+
+    const sd = user.start_date ?? "";
+    setStartDate(sd);
+    setInitialStartDate(sd); // ✅ snapshot
 
     setBloodType(user.blood_type ?? "");
     setEmergencyName(user.emergency_contact_name ?? "");
@@ -115,22 +119,26 @@ export default function EditProfileModal({
   async function handleSave() {
     if (!user) return;
 
-    await onSave(user.id, {
+    // Armamos payload sin start_date por defecto
+    const payload: EditProfilePayload = {
       // identidad
       first_name: firstName.trim() ? firstName.trim() : null,
       last_name: lastName.trim() ? lastName.trim() : null,
-      full_name: computedFullName, // legacy compat
+      full_name: computedFullName,
 
       // RRHH
       dni: dni.trim() ? dni.trim() : null,
       job_title: jobTitle.trim() ? jobTitle.trim() : null,
       team: team.trim() ? team.trim() : null,
-      start_date: startDate || null,
 
       // salud / emergencia
       blood_type: bloodType.trim() ? bloodType.trim() : null,
-      emergency_contact_name: emergencyName.trim() ? emergencyName.trim() : null,
-      emergency_contact_phone: emergencyPhone.trim() ? emergencyPhone.trim() : null,
+      emergency_contact_name: emergencyName.trim()
+        ? emergencyName.trim()
+        : null,
+      emergency_contact_phone: emergencyPhone.trim()
+        ? emergencyPhone.trim()
+        : null,
 
       // authz
       role,
@@ -138,8 +146,14 @@ export default function EditProfileModal({
 
       // legacy
       annual_vacation_days: Number.isFinite(annualDays) ? annualDays : 10,
-    });
+    };
 
+    // ✅ SOLO si cambió el input de fecha, mandamos start_date
+    if (startDate !== initialStartDate) {
+      payload.start_date = startDate.trim() ? startDate.trim() : null;
+    }
+
+    await onSave(user.id, payload);
     onClose();
   }
 
@@ -353,12 +367,12 @@ export default function EditProfileModal({
               Cancelar
             </button>
 
-            <button
-              onClick={handleSave}
-              disabled={!canSave}
-              className="px-4 py-2 rounded-lg font-semibold bg-lll-accent text-black disabled:opacity-50"
-              type="button"
-            >
+          <button
+            onClick={handleSave}
+            disabled={!canSave}
+            className="px-4 py-2 rounded-lg font-semibold bg-lll-accent text-black disabled:opacity-50"
+            type="button"
+          >
               Guardar
             </button>
           </div>

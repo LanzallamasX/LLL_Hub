@@ -1,14 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 
-import UserLayout from "@/components/layout/UserLayout";
 import BalanceDonut from "@/components/balances/BalanceDonut";
 import BalanceBar from "@/components/balances/BalanceBar";
 
 import { useAbsences } from "@/contexts/AbsencesContext";
-import { useAuth } from "@/contexts/AuthContext";
 
 import { computeBalanceStatsByKey, buildHistoryRows } from "@/lib/balances/stats";
 import { POLICIES, type BalanceKey, type PolicyUnit } from "@/lib/absencePolicies";
@@ -57,49 +54,46 @@ type StatRow = {
   available: number | null;
 };
 
-export default function BalancesPage() {
-  const router = useRouter();
-  const { userId, isAuthed, isLoading, startDate } = useAuth();
+export default function BalancesView({
+  targetUserId,
+  startDateISO,
+}: {
+  targetUserId: string;
+  startDateISO?: string | null;
+}) {
   const { absences, loadMyAbsences } = useAbsences();
-
   const didLoad = useRef(false);
 
   useEffect(() => {
-    if (isLoading) return;
-    if (!isAuthed || !userId) {
-      router.replace("/login");
-      return;
-    }
+    if (!targetUserId) return;
     if (!didLoad.current) {
       didLoad.current = true;
-      loadMyAbsences(userId);
+      loadMyAbsences(targetUserId);
     }
-  }, [isLoading, isAuthed, userId, router, loadMyAbsences]);
+  }, [targetUserId, loadMyAbsences]);
 
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month0, setMonth0] = useState<number | "all">(now.getMonth());
   const [selectedKey, setSelectedKey] = useState<BalanceKey | null>(null);
 
-  // ✅ UI: buscador + toggle
+  // UI (lista compacta)
   const [q, setQ] = useState("");
   const [showAll, setShowAll] = useState(false);
 
   const myAbsences = useMemo(() => {
-    if (!userId) return [];
-    return absences.filter((a) => a.userId === userId);
-  }, [absences, userId]);
+    return absences.filter((a) => a.userId === targetUserId);
+  }, [absences, targetUserId]);
 
   const vacationBalance = useMemo(() => {
-    if (!startDate) return null;
-
+    if (!startDateISO) return null;
     return computeVacationBalance({
       absences: myAbsences,
       currentYear: year,
-      startDateISO: startDate,
+      startDateISO,
       settings: DEFAULT_VACATION_SETTINGS,
     });
-  }, [myAbsences, year, startDate]);
+  }, [myAbsences, year, startDateISO]);
 
   const statsMap = useMemo(() => {
     const map = computeBalanceStatsByKey(
@@ -143,7 +137,6 @@ export default function BalancesPage() {
   const statsList = useMemo<StatRow[]>(() => {
     const list = breakdownCatalog.map((def) => {
       const s = statsMap.get(def.balanceKey);
-
       const used = s?.used ?? 0;
       const reserved = s?.reserved ?? 0;
 
@@ -161,7 +154,6 @@ export default function BalancesPage() {
       };
     });
 
-    // UX: primero con cupo; luego alfabético
     return list.sort((a, b) => {
       const aHas = a.allowance != null ? 0 : 1;
       const bHas = b.allowance != null ? 0 : 1;
@@ -190,9 +182,6 @@ export default function BalancesPage() {
 
   const rangeLabel = month0 === "all" ? `Año ${year}` : monthLabel(year, month0);
 
-  // ✅ FILTRO AGRESIVO:
-  // - si hay búsqueda: mostramos todo (respeta intención del usuario)
-  // - si no hay búsqueda y showAll OFF: ocultamos sin cupo y disponible 0
   const filteredStatsList = useMemo(() => {
     const query = q.trim().toLowerCase();
     const hasQuery = query.length > 0;
@@ -200,8 +189,7 @@ export default function BalancesPage() {
     let list = statsList;
 
     if (hasQuery) {
-      list = list.filter((s) => s.label.toLowerCase().includes(query));
-      return list;
+      return list.filter((s) => s.label.toLowerCase().includes(query));
     }
 
     if (showAll) return list;
@@ -215,14 +203,11 @@ export default function BalancesPage() {
 
   const hiddenCount = useMemo(() => {
     const query = q.trim();
-    if (query) return 0; // no ocultamos cuando busca
+    if (query) return 0;
     if (showAll) return 0;
-
-    // ocultas = total - visibles (con regla agresiva)
     return Math.max(0, statsList.length - filteredStatsList.length);
   }, [statsList.length, filteredStatsList.length, q, showAll]);
 
-  // ✅ Selección consistente con el filtro
   useEffect(() => {
     if (!filteredStatsList.length) {
       setSelectedKey(null);
@@ -233,22 +218,16 @@ export default function BalancesPage() {
       return;
     }
     const stillThere = filteredStatsList.some((x) => x.balanceKey === selectedKey);
-    if (!stillThere) {
-      setSelectedKey(filteredStatsList[0].balanceKey);
-    }
+    if (!stillThere) setSelectedKey(filteredStatsList[0].balanceKey);
   }, [selectedKey, filteredStatsList]);
 
   const selected = useMemo(() => {
     if (!selectedKey) return null;
-    // detalle desde catálogo completo, aunque esté oculto por filtro
     return statsList.find((x) => x.balanceKey === selectedKey) ?? null;
   }, [selectedKey, statsList]);
 
   return (
-    <UserLayout
-      mode="user"
-      header={{ title: "Balances", subtitle: "Cupos, usados, reservados (pendientes) e historial." }}
-    >
+    <>
       {/* Top bar */}
       <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -306,19 +285,15 @@ export default function BalancesPage() {
         </div>
       </div>
 
-      {/* Main */}
       <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Left: Políticas compactas */}
+        {/* Left */}
         <div className="lg:col-span-1">
           <div className="rounded-2xl border border-lll-border bg-lll-bg-soft overflow-hidden">
-            {/* Header sticky */}
             <div className="sticky top-0 z-10 bg-lll-bg-soft/95 backdrop-blur border-b border-lll-border p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold">Políticas</p>
-                  <p className="text-[12px] text-lll-text-soft truncate">
-                    Tocá una para ver el detalle
-                  </p>
+                  <p className="text-[12px] text-lll-text-soft truncate">Tocá una para ver el detalle</p>
                 </div>
 
                 <label className="flex items-center gap-2 text-[12px] text-lll-text-soft shrink-0">
@@ -343,80 +318,67 @@ export default function BalancesPage() {
                   {filteredStatsList.length} visible(s)
                   {hiddenCount > 0 ? ` · ${hiddenCount} oculta(s)` : ""}
                 </p>
-                {!showAll && !q.trim() && (
-                  <p className="mt-1 text-[11px] text-lll-text-soft">
-                    Mostrando solo con cupo y disponible &gt; 0 (para acortar).
-                  </p>
-                )}
               </div>
             </div>
 
-            {/* Scroll list */}
-            <div className="p-3 max-h-[70vh] overflow-y-auto space-y-3">
-              {statsList.length === 0 && (
+            <div className="p-3 max-h-[70vh] overflow-y-auto space-y-3 scrollbar-thin">
+              {filteredStatsList.length === 0 ? (
                 <div className="rounded-2xl border border-lll-border bg-lll-bg-softer p-4 text-[12px] text-lll-text-soft">
-                  No hay datos aún.
+                  No hay políticas visibles con ese criterio. Probá “Mostrar todas” o buscá por nombre.
                 </div>
-              )}
+              ) : (
+                filteredStatsList.map((s) => {
+                  const active = selectedKey === s.balanceKey;
+                  const unit = fmtUnit(s.unit);
 
-              {statsList.length > 0 && filteredStatsList.length === 0 && (
-                <div className="rounded-2xl border border-lll-border bg-lll-bg-softer p-4 text-[12px] text-lll-text-soft">
-                  No hay políticas visibles con ese criterio. Probá:
-                  <span className="font-semibold"> “Mostrar todas”</span> o buscá por nombre.
-                </div>
-              )}
+                  return (
+                    <button
+                      key={s.balanceKey}
+                      type="button"
+                      onClick={() => setSelectedKey(s.balanceKey)}
+                      className={`w-full text-left rounded-2xl border p-4 transition ${
+                        active
+                          ? "border-lll-accent/60 bg-lll-accent-soft"
+                          : "border-lll-border bg-lll-bg-soft hover:bg-lll-bg-softer"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold leading-tight truncate">{s.label}</p>
+                          <p className="mt-1 text-[12px] text-lll-text-soft">
+                            Cupo: {s.allowance == null ? "—" : `${s.allowance}${unit}`}
+                          </p>
+                        </div>
 
-              {filteredStatsList.map((s) => {
-                const active = selectedKey === s.balanceKey;
-                const unit = fmtUnit(s.unit);
-
-                return (
-                  <button
-                    key={s.balanceKey}
-                    type="button"
-                    onClick={() => setSelectedKey(s.balanceKey)}
-                    className={`w-full text-left rounded-2xl border p-4 transition ${
-                      active
-                        ? "border-lll-accent/60 bg-lll-accent-soft"
-                        : "border-lll-border bg-lll-bg-soft hover:bg-lll-bg-softer"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold leading-tight truncate">{s.label}</p>
-                        <p className="mt-1 text-[12px] text-lll-text-soft">
-                          Cupo: {s.allowance == null ? "—" : `${s.allowance}${unit}`}
-                        </p>
+                        <div className="text-right shrink-0">
+                          <p className="text-[11px] text-lll-text-soft">Disponible</p>
+                          <p className="text-xl font-bold leading-none">
+                            {s.available == null ? "—" : s.available}
+                            {s.allowance == null ? null : (
+                              <span className="ml-1 text-[12px] font-semibold text-lll-text-soft">
+                                {unit}
+                              </span>
+                            )}
+                          </p>
+                        </div>
                       </div>
 
-                      <div className="text-right shrink-0">
-                        <p className="text-[11px] text-lll-text-soft">Disponible</p>
-                        <p className="text-xl font-bold leading-none">
-                          {s.available == null ? "—" : s.available}
-                          {s.allowance == null ? null : (
-                            <span className="ml-1 text-[12px] font-semibold text-lll-text-soft">
-                              {unit}
-                            </span>
-                          )}
-                        </p>
-                      </div>
-                    </div>
-
-                    <BalanceBar
-                      used={s.used}
-                      reserved={s.reserved}
-                      available={s.available}
-                      allowance={s.allowance}
-                      unit={s.unit}
-                    />
-                  </button>
-                );
-              })}
+                      <BalanceBar
+                        used={s.used}
+                        reserved={s.reserved}
+                        available={s.available}
+                        allowance={s.allowance}
+                        unit={s.unit}
+                      />
+                    </button>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>
 
-        {/* Right: detalle + donut + KPIs */}
+        {/* Right */}
         <div className="lg:col-span-2 space-y-4">
           {selected ? (
             <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
@@ -472,7 +434,6 @@ export default function BalancesPage() {
             </div>
           )}
 
-          {/* Historial */}
           <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
             <div className="flex items-center justify-between">
               <p className="text-sm font-semibold">Historial</p>
@@ -516,8 +477,9 @@ export default function BalancesPage() {
               </table>
             </div>
           </div>
+
         </div>
       </div>
-    </UserLayout>
+    </>
   );
 }

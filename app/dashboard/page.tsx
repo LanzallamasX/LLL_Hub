@@ -274,11 +274,14 @@ async function handleSubmit(payload: NewAbsencePayload) {
 
           <AbsenceList absences={myAbsences} onEdit={openEdit} />
 
+{/*
           <BalancesSummary
   usageByKey={usageByKey}
   vacationAvailable={vacationBalance.available}
   vacationAllowance={vacationBalance.entitlement + vacationBalance.carryover}
 />
+*/
+}
           
         </div>
 

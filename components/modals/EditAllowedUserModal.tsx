@@ -8,7 +8,10 @@ export type EditAllowedUserPayload = {
   role?: AllowedUserRole;
   is_active?: boolean;
   team?: string | null;
-  start_date?: string | null; // YYYY-MM-DD
+
+  // SOLO si cambia (importante)
+  start_date?: string | null;
+
   annual_vacation_days?: number;
 };
 
@@ -27,18 +30,26 @@ export default function EditAllowedUserModal({
   const [role, setRole] = useState<AllowedUserRole>("user");
   const [isActive, setIsActive] = useState(true);
   const [team, setTeam] = useState("");
+
   const [startDate, setStartDate] = useState("");
+  const [initialStartDate, setInitialStartDate] = useState("");
+
   const [annualDays, setAnnualDays] = useState<number>(10);
 
   const canSave = useMemo(() => !!user, [user]);
 
   useEffect(() => {
     if (!open || !user) return;
+
     setFullName(user.full_name ?? "");
     setRole(user.role);
     setIsActive(user.is_active);
     setTeam(user.team ?? "");
-    setStartDate(user.start_date ?? "");
+
+    const sd = user.start_date ?? "";
+    setStartDate(sd);
+    setInitialStartDate(sd);
+
     setAnnualDays(Number(user.annual_vacation_days ?? 10));
   }, [open, user]);
 
@@ -46,19 +57,30 @@ export default function EditAllowedUserModal({
 
   async function handleSave() {
     if (!user) return;
-    await onSave(user.id, {
+
+    const payload: EditAllowedUserPayload = {
       full_name: fullName.trim() ? fullName.trim() : null,
       role,
       is_active: isActive,
       team: team.trim() ? team.trim() : null,
-      start_date: startDate || null,
       annual_vacation_days: Number.isFinite(annualDays) ? annualDays : 10,
-    });
+    };
+
+    // ✅ SOLO si cambió la fecha, la mandamos
+    if (startDate !== initialStartDate) {
+      payload.start_date = startDate.trim() ? startDate.trim() : null;
+    }
+
+    await onSave(user.id, payload);
     onClose();
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+    <div
+      className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+    >
       <div className="w-full max-w-xl rounded-2xl border border-lll-border bg-lll-bg-soft overflow-hidden">
         <div className="p-4 border-b border-lll-border flex items-center justify-between">
           <div>

@@ -2,7 +2,7 @@
 import { supabase } from "@/lib/supabase/client";
 import type { AbsenceTypeId } from "@/lib/absenceTypes";
 import type { DeductionPayload } from "@/lib/absenceDeductions";
-
+import type { LicenseSubtype } from "@/lib/absencePolicies"; // ✅ NUEVO
 
 export type AbsenceStatus = "pendiente" | "aprobado" | "rechazado";
 
@@ -10,6 +10,11 @@ const ABSENCE_SELECT_WITH_DECIDER = `
   *,
   decided_by_profile:profiles!absences_decided_by_fkey(full_name,email)
 `;
+
+export type ProfileLite = {
+  full_name: string | null;
+  email: string | null;
+};
 
 export type AbsenceRow = {
   id: string;
@@ -31,9 +36,9 @@ export type AbsenceRow = {
   decided_by: string | null;
   decided_at: string | null;
 
-  subtype?: string | null; // luego lo tipamos fuerte si querés
+  // ✅ tipado fuerte
+  subtype?: LicenseSubtype | null;
   hours?: number | null;
-  
 };
 
 // Tu modelo “frontend”
@@ -53,9 +58,9 @@ export type Absence = {
   decidedAt?: string | null;
   decidedByProfile?: { fullName: string | null; email: string | null } | null;
 
-  subtype?: string | null;
-  hours?: number | null;  
-
+  // ✅ tipado fuerte
+  subtype?: LicenseSubtype | null;
+  hours?: number | null;
 };
 
 export type CreateAbsenceInput = {
@@ -66,8 +71,9 @@ export type CreateAbsenceInput = {
   type: AbsenceTypeId;
   note?: string;
 
-  subtype?: string | null;
-  hours?: number | null;  
+  // ✅ tipado fuerte
+  subtype?: LicenseSubtype | null;
+  hours?: number | null;
 };
 
 export type UpdateAbsenceInput = {
@@ -76,12 +82,14 @@ export type UpdateAbsenceInput = {
   type: AbsenceTypeId;
   note?: string;
 
-  subtype?: string | null;
-  hours?: number | null;  
-  
+  // ✅ tipado fuerte
+  subtype?: LicenseSubtype | null;
+  hours?: number | null;
 };
 
-export function mapRowToAbsence(r: AbsenceRow & { decided_by_profile?: ProfileLite | null }): Absence {
+export function mapRowToAbsence(
+  r: AbsenceRow & { decided_by_profile?: ProfileLite | null }
+): Absence {
   return {
     id: r.id,
     userId: r.user_id,
@@ -108,10 +116,8 @@ export function mapRowToAbsence(r: AbsenceRow & { decided_by_profile?: ProfileLi
 export async function listMyAbsences(userId: string): Promise<Absence[]> {
   const { data, error } = await supabase
     .from("absences")
-    .select(`
-      *,
-      decided_by_profile:profiles!absences_decided_by_fkey(full_name,email)
-    `)
+    //.select(ABSENCE_SELECT_WITH_DECIDER)
+    .select("*")
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
 
@@ -122,16 +128,12 @@ export async function listMyAbsences(userId: string): Promise<Absence[]> {
 export async function listAllAbsencesForOwner(): Promise<Absence[]> {
   const { data, error } = await supabase
     .from("absences")
-    .select(`
-      *,
-      decided_by_profile:profiles!absences_decided_by_fkey(full_name,email)
-    `)
+    .select(ABSENCE_SELECT_WITH_DECIDER)
     .order("created_at", { ascending: false });
 
   if (error) throw error;
   return (data as any[]).map((row) => mapRowToAbsence(row));
 }
-
 
 export async function createAbsence(input: CreateAbsenceInput): Promise<Absence> {
   const payload = {
@@ -143,18 +145,18 @@ export async function createAbsence(input: CreateAbsenceInput): Promise<Absence>
     date_to: input.to,
     note: input.note ?? null,
     subtype: input.subtype ?? null,
-    hours: input.hours ?? null,    
-    
-    
+    hours: input.hours ?? null,
   };
 
   const { data, error } = await supabase
     .from("absences")
     .insert(payload)
-    .select(ABSENCE_SELECT_WITH_DECIDER)
+    .select("*")        // ✅ SIN join acá
     .single();
 
   if (error) throw error;
+
+  // OJO: acá decided_by_profile no va a venir (está bien)
   return mapRowToAbsence(data as any);
 }
 
@@ -173,50 +175,42 @@ export async function updateAbsenceStatus(
   return mapRowToAbsence(data as any);
 }
 
-  export async function approveAbsence(id: string, deduction?: DeductionPayload) {
-    if (!deduction) {
+export async function approveAbsence(id: string, deduction?: DeductionPayload) {
+  if (!deduction) {
+    return updateAbsenceStatus(id, "aprobado");
+  }
+
+  const { data, error } = await supabase.rpc("approve_absence_with_deduction", {
+    p_absence_id: id,
+    p_balance_key: deduction.balanceKey,
+    p_unit: deduction.unit,
+    p_amount: deduction.amount,
+  });
+
+  if (error) {
+    const msg = (error as any)?.message?.toLowerCase?.() ?? "";
+    if (msg.includes("function") && msg.includes("does not exist")) {
       return updateAbsenceStatus(id, "aprobado");
     }
-
-    const { data, error } = await supabase.rpc("approve_absence_with_deduction", {
-      p_absence_id: id,
-      p_balance_key: deduction.balanceKey,
-      p_unit: deduction.unit,
-      p_amount: deduction.amount,
-    });
-
-    if (error) {
-      const msg = (error as any)?.message?.toLowerCase?.() ?? "";
-
-      // ✅ fallback SOLO si el RPC no existe
-      if (msg.includes("function") && msg.includes("does not exist")) {
-        return updateAbsenceStatus(id, "aprobado");
-      }
-
-      // ❌ si falló por permisos o lógica, NO aprobamos
-      throw error;
-    }
-
-    // data debería ser AbsenceRow (ideal). Si tu RPC devuelve json, ok.
-    return mapRowToAbsence(data as any);
+    throw error;
   }
+
+  return mapRowToAbsence(data as any);
+}
 
 export async function rejectAbsence(id: string) {
   return updateAbsenceStatus(id, "rechazado");
 }
 
-
-export async function updateAbsence(
-  id: string,
-  input: UpdateAbsenceInput
-): Promise<Absence> {
+export async function updateAbsence(id: string, input: UpdateAbsenceInput): Promise<Absence> {
   const { data, error } = await supabase
     .from("absences")
     .update({
       date_from: input.from,
-      date_to: input.to, 
+      date_to: input.to,
       type: input.type,
       note: input.note?.trim() ? input.note.trim() : null,
+
       subtype: input.subtype ?? null,
       hours: input.hours ?? null,
     })
@@ -229,26 +223,10 @@ export async function updateAbsence(
 }
 
 export async function deleteAbsence(id: string) {
-  const { data, error } = await supabase
-    .from("absences")
-    .delete()
-    .eq("id", id)
-    .select("id"); // confirma qué borró
-
+  const { data, error } = await supabase.from("absences").delete().eq("id", id).select("id");
   if (error) throw error;
-
-  // Si no devolvió filas, casi siempre es:
-  // - RLS/policy impide borrar
-  // - o el ID no existe
   if (!data || data.length === 0) {
     throw new Error("No se pudo eliminar (sin permisos o solicitud inexistente).");
   }
-
   return true;
 }
-
-
-export type ProfileLite = {
-  full_name: string | null;
-  email: string | null;
-};

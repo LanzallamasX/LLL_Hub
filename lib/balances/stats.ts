@@ -1,8 +1,9 @@
 // src/lib/balances/stats.ts
 import type { Absence, AbsenceStatus } from "@/lib/supabase/absences";
-import { getPolicySafe, type BalanceKey, type PolicyUnit } from "@/lib/absencePolicies";
+import { POLICIES, getPolicySafe, type BalanceKey, type PolicyUnit } from "@/lib/absencePolicies";
 import { countChargeableDays } from "@/lib/vacations/dateCount";
 import { DEFAULT_VACATION_SETTINGS } from "@/lib/vacations/settings";
+import { computeVacationBalance } from "@/lib/vacations/calc";
 
 export type BalanceStats = {
   balanceKey: BalanceKey;
@@ -11,6 +12,8 @@ export type BalanceStats = {
   used: number;             // aprobado
   reserved: number;         // pendiente
   available: number | null; // cupo - used - reserved
+  // (opcional si querés mostrar “Acum” en el breakdown)
+  meta?: { entitlement?: number; carryover?: number };
 };
 
 function daysBetweenInclusive(fromISO: string, toISO: string) {
@@ -22,7 +25,6 @@ function daysBetweenInclusive(fromISO: string, toISO: string) {
 }
 
 function overlapsMonth(a: Absence, year: number, month0: number) {
-  // month0: 0..11
   const start = new Date(year, month0, 1).getTime();
   const end = new Date(year, month0 + 1, 1).getTime(); // exclusive
 
@@ -40,7 +42,6 @@ function amountForAbsence(a: Absence, unit: PolicyUnit) {
 
   // day
   if (a.type === "vacaciones") {
-    // para vacaciones mantenemos tu conteo "real" (business_days o calendario según settings)
     return countChargeableDays(a.from, a.to, DEFAULT_VACATION_SETTINGS.countMode);
   }
 
@@ -50,10 +51,50 @@ function amountForAbsence(a: Absence, unit: PolicyUnit) {
 export function computeBalanceStatsByKey(
   absences: Absence[],
   year: number,
-  month0?: number
+  month0: number | undefined,
+  startDateISO?: string | null
 ): Map<BalanceKey, BalanceStats> {
   const map = new Map<BalanceKey, BalanceStats>();
 
+  // 1) Seed: todas las policies que deducen (para que aparezcan aunque estén en 0)
+  for (const p of POLICIES) {
+    if (!p.deducts || !p.deductsFrom) continue;
+
+    map.set(p.deductsFrom, {
+      balanceKey: p.deductsFrom,
+      unit: p.unit,
+      allowance: p.allowance,
+      used: 0,
+      reserved: 0,
+      available: p.allowance == null ? null : p.allowance,
+    });
+  }
+
+  // 2) Vacaciones: override allowance con tu cálculo real (entitlement + carryover)
+  //    (si no hay startDateISO, igual dejamos algo razonable)
+  const vacKey: BalanceKey = "VACATION_DAYS";
+  if (map.has(vacKey)) {
+    const vac = computeVacationBalance({
+      absences,
+      currentYear: year,
+      startDateISO: startDateISO ?? null,
+      settings: DEFAULT_VACATION_SETTINGS,
+    });
+
+    const allowance = vac.entitlement + vac.carryover;
+
+    map.set(vacKey, {
+      balanceKey: vacKey,
+      unit: "day",
+      allowance,
+      used: 0,
+      reserved: 0,
+      available: allowance,
+      meta: { entitlement: vac.entitlement, carryover: vac.carryover },
+    });
+  }
+
+  // 3) Movimientos (aprobado + pendiente)
   const relevant = absences.filter((a) => {
     if (a.status !== "aprobado" && a.status !== "pendiente") return false;
     if (month0 == null) return true;
@@ -61,36 +102,28 @@ export function computeBalanceStatsByKey(
   });
 
   for (const a of relevant) {
-    const policy = a.type === "licencia"
-      ? getPolicySafe({ type: "licencia" as any, subtype: (a as any).subtype ?? null })
-      : getPolicySafe({ type: a.type as any, subtype: null });
+    const policy =
+      a.type === "licencia"
+        ? getPolicySafe({ type: "licencia" as any, subtype: (a as any).subtype ?? null })
+        : getPolicySafe({ type: a.type as any, subtype: null });
 
     if (!policy?.deducts || !policy.deductsFrom) continue;
 
-    const key = policy.deductsFrom;
-    const unit = policy.unit;
-    const allowance = policy.allowance;
+    const entry = map.get(policy.deductsFrom);
+    if (!entry) continue;
 
-    const entry = map.get(key) ?? {
-      balanceKey: key,
-      unit,
-      allowance,
-      used: 0,
-      reserved: 0,
-      available: allowance == null ? null : allowance,
-    };
-
-    const amt = amountForAbsence(a, unit);
+    const amt = amountForAbsence(a, policy.unit);
 
     if (a.status === "aprobado") entry.used += amt;
     if (a.status === "pendiente") entry.reserved += amt;
 
-    entry.available = entry.allowance == null ? null : Math.max(0, entry.allowance - entry.used - entry.reserved);
+    entry.available =
+      entry.allowance == null ? null : Math.max(0, entry.allowance - entry.used - entry.reserved);
 
-    map.set(key, entry);
+    map.set(policy.deductsFrom, entry);
   }
 
-  // asegurar available aunque no haya movimientos
+  // 4) Recalcular available al final (por las dudas)
   for (const [k, v] of map) {
     v.available = v.allowance == null ? null : Math.max(0, v.allowance - v.used - v.reserved);
     map.set(k, v);
@@ -99,6 +132,7 @@ export function computeBalanceStatsByKey(
   return map;
 }
 
+// buildHistoryRows queda igual que lo tenías (solo muestra movimientos)
 export type HistoryRow = {
   id: string;
   dateFrom: string;
@@ -111,11 +145,7 @@ export type HistoryRow = {
   note?: string | null;
 };
 
-export function buildHistoryRows(
-  absences: Absence[],
-  year: number,
-  month0?: number
-): HistoryRow[] {
+export function buildHistoryRows(absences: Absence[], year: number, month0?: number): HistoryRow[] {
   const relevant = absences.filter((a) => {
     if (a.status !== "aprobado" && a.status !== "pendiente") return false;
     if (month0 == null) return true;
@@ -125,9 +155,10 @@ export function buildHistoryRows(
   const rows: HistoryRow[] = [];
 
   for (const a of relevant) {
-    const policy = a.type === "licencia"
-      ? getPolicySafe({ type: "licencia" as any, subtype: (a as any).subtype ?? null })
-      : getPolicySafe({ type: a.type as any, subtype: null });
+    const policy =
+      a.type === "licencia"
+        ? getPolicySafe({ type: "licencia" as any, subtype: (a as any).subtype ?? null })
+        : getPolicySafe({ type: a.type as any, subtype: null });
 
     if (!policy?.deducts || !policy.deductsFrom) continue;
 

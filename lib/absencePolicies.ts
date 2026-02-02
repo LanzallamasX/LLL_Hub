@@ -3,7 +3,7 @@ export type PolicyUnit = "day" | "hour";
 
 export type BalanceKey =
   | "VACATION_DAYS"
-  | "HOME_OFFICE_DAYS"        // ✅ NUEVO
+  | "HOME_OFFICE_DAYS" // ✅ NUEVO (si no estaba)
   | "BIRTHDAY_DAY"
   | "LIC_FAMILY_CARE_DAYS"
   | "LIC_EXAMS_DAYS"
