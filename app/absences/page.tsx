@@ -16,6 +16,7 @@ import type { Absence } from "@/lib/supabase/absences";
 //para mostrar ausencias usadas
 import { computeUsageByBalanceKey } from "@/lib/balances/usage";
 
+
 type Filter = "todas" | "pendiente" | "aprobado" | "rechazado";
 
 export default function MyAbsencesPage() {
@@ -231,19 +232,17 @@ async function handleSubmit(payload: NewAbsencePayload) {
         onClose={closeModal}
         onSubmit={handleSubmit}
         initial={
-          editing
-            ? {
-                from: editing.from,
-                to: editing.to,
-                type: editing.type,
-                note: editing.note ?? "",
-
-                // ✅ NUEVO
-                subtype: editing.subtype ?? null,
-                hours: editing.hours ?? null,
-              }
-            : undefined
-        }
+            editing
+              ? {
+                  from: editing.from,
+                  to: editing.to,
+                  type: editing.type,
+                  note: editing.note ?? "",
+                  subtype: (editing.subtype as NewAbsencePayload["subtype"]),
+                  hours: editing.hours ?? null,
+                }
+              : undefined
+          }
         submitLabel={editing ? "Guardar cambios" : "Enviar"}
         title={editing ? "Editar solicitud" : "Nueva solicitud"}
         subtitle={editing ? "Podés editar mientras esté pendiente." : "Completá los datos y enviá la solicitud."}

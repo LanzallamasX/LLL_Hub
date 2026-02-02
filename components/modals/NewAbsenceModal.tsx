@@ -9,12 +9,15 @@ import {
   getLicenseSubtypeLabel,
 } from "@/lib/absenceTypes";
 
-import { getPolicySafe, type LicenseSubtype } from "@/lib/absencePolicies";
+import {
+  getPolicySafe,
+  type LicenseSubtype,
+  type BalanceKey,
+  type PolicyUnit,
+} from "@/lib/absencePolicies";
 
 import { countChargeableDays } from "@/lib/vacations/dateCount";
 import { DEFAULT_VACATION_SETTINGS } from "@/lib/vacations/settings";
-
-import type { BalanceKey, PolicyUnit } from "@/lib/absencePolicies";
 
 export type NewAbsencePayload = {
   from: string;
@@ -29,10 +32,10 @@ export type NewAbsencePayload = {
 type Usage = { used: number; unit: PolicyUnit };
 
 type VacationInfo = {
-  entitlement: number;     // cupo del año
-  carryover: number;       // acumulado
-  usedThisYear: number;    // usado
-  available: number;       // disponible
+  entitlement: number; // cupo del año
+  carryover: number;   // acumulado
+  usedThisYear: number;// usado
+  available: number;   // disponible
 };
 
 type Props = {
@@ -54,19 +57,27 @@ type Props = {
   usageByKey?: Map<BalanceKey, Usage>;
 };
 
-const LICENSE_SUBTYPES: LicenseSubtype[] = [
+// ✅ Tipamos la lista con el LicenseSubtype REAL (importado)
+const LICENSE_SUBTYPES: readonly LicenseSubtype[] = [
   "ATENCION_GRUPO_FAMILIAR",
-  "CUMPLEANIOS_LIBRE",
+  "CUMPLE_LIBRE",
   "EXAMEN",
   "FALLECIMIENTO_CONYUGE_HIJO_PADRES",
   "FALLECIMIENTO_HERMANO",
   "PATERNIDAD",
   "MATERNIDAD",
   "MUDANZA",
-  "RAZONES_PARTICULARES_LCT",
+  "RAZONES_PARTICULARES",
   "TRAMITE_PERSONAL",
   "TURNO_MEDICO",
 ];
+
+function toLicenseSubtype(value: string | null): LicenseSubtype | null {
+  if (!value) return null;
+  return (LICENSE_SUBTYPES as readonly string[]).includes(value)
+    ? (value as LicenseSubtype)
+    : null;
+}
 
 export default function NewAbsenceModal({
   open,
@@ -87,9 +98,11 @@ export default function NewAbsenceModal({
   );
   const [note, setNote] = useState(initial?.note ?? "");
 
+  // ✅ subtype: usa el LicenseSubtype importado
   const [subtype, setSubtype] = useState<LicenseSubtype | "">(
-    (initial?.subtype as any) ?? ""
+    (initial?.subtype as LicenseSubtype | null | undefined) ?? ""
   );
+
   const [hours, setHours] = useState<string>(
     initial?.hours != null && Number.isFinite(Number(initial?.hours))
       ? String(initial?.hours)
@@ -100,10 +113,10 @@ export default function NewAbsenceModal({
   const isVacation = type === "vacaciones";
   const isLicense = type === "licencia";
 
-  // Policy safe
   const policy = useMemo(() => {
     if (isLicense) {
       if (!subtype) return null;
+      // si tu getPolicySafe exige formato específico, podés dejarlo así:
       return getPolicySafe({ type: "licencia" as any, subtype: subtype as any });
     }
     return getPolicySafe({ type: type as any, subtype: null });
@@ -113,17 +126,16 @@ export default function NewAbsenceModal({
 
   const dateRangeOk = useMemo(() => {
     if (!from) return false;
-    if (isHourUnit) return true; // por horas: una sola fecha
+    if (isHourUnit) return true;
     if (!to) return false;
     return to >= from;
   }, [from, to, isHourUnit]);
 
-  // ✅ Barra NALOO (licencias / home office / cumple...) si policy deduce y tiene allowance
   const usage = useMemo(() => {
     if (!policy?.deducts || !policy.deductsFrom) return null;
 
     const used = usageByKey?.get(policy.deductsFrom)?.used ?? 0;
-    const allowance = policy.allowance; // number | null
+    const allowance = policy.allowance;
     const available = allowance == null ? null : Math.max(0, allowance - used);
 
     return {
@@ -144,7 +156,6 @@ export default function NewAbsenceModal({
       return h > usage.available;
     }
 
-    // day (calendario inclusive)
     if (!from || !to || to < from) return false;
     const s = new Date(from + "T00:00:00");
     const e = new Date(to + "T00:00:00");
@@ -152,7 +163,6 @@ export default function NewAbsenceModal({
     return days > usage.available;
   }, [usage, from, to, hours]);
 
-  // si es por horas, mantenemos to=from
   useEffect(() => {
     if (!open) return;
     if (!isHourUnit) return;
@@ -160,7 +170,6 @@ export default function NewAbsenceModal({
     if (to !== from) setTo(from);
   }, [open, isHourUnit, from, to]);
 
-  // vacaciones: conteo + balance
   const requestedDays = useMemo(() => {
     if (!dateRangeOk) return 0;
     if (!isVacation) return 0;
@@ -168,7 +177,6 @@ export default function NewAbsenceModal({
     return countChargeableDays(from, to, DEFAULT_VACATION_SETTINGS.countMode);
   }, [from, to, dateRangeOk, isVacation]);
 
-  // Para validación de vacaciones preferimos vacationInfo.available; fallback a vacationAvailable
   const vacationAvail = vacationInfo?.available ?? vacationAvailable;
   const hasVacationAvail = typeof vacationAvail === "number";
 
@@ -194,14 +202,10 @@ export default function NewAbsenceModal({
     if (exceedsAvailable) return false;
     if (!licenseSubtypeOk) return false;
     if (!hoursOk) return false;
-
-    // Para políticas con cupo (home office / licencias por cupo), bloqueamos si excede
     if (!isVacation && exceedsPolicyAvailable) return false;
-
     return true;
   }, [dateRangeOk, exceedsAvailable, licenseSubtypeOk, hoursOk, exceedsPolicyAvailable, isVacation]);
 
-  // reset al abrir
   useEffect(() => {
     if (!open) return;
 
@@ -210,7 +214,7 @@ export default function NewAbsenceModal({
     setType((initial?.type as AbsenceTypeId) ?? "vacaciones");
     setNote(initial?.note ?? "");
 
-    setSubtype((initial?.subtype as any) ?? "");
+    setSubtype((initial?.subtype as LicenseSubtype | null | undefined) ?? "");
     setHours(
       initial?.hours != null && Number.isFinite(Number(initial?.hours))
         ? String(initial?.hours)
@@ -226,7 +230,6 @@ export default function NewAbsenceModal({
     initial?.hours,
   ]);
 
-  // escape
   useEffect(() => {
     if (!open) return;
     function onKeyDown(e: KeyboardEvent) {
@@ -244,7 +247,7 @@ export default function NewAbsenceModal({
       to: isHourUnit ? from : to,
       type,
       note: note.trim() ? note.trim() : undefined,
-      subtype: isLicense ? ((subtype || null) as any) : null,
+      subtype: isLicense ? (subtype ? subtype : null) : null,
       hours: isHourUnit ? Number(hours) : null,
     };
 
@@ -328,11 +331,11 @@ export default function NewAbsenceModal({
                 }}
               >
                 <option value="">Seleccionar…</option>
-                {LICENSE_SUBTYPES.map((s) => (
-                  <option key={s} value={s}>
-                    {getLicenseSubtypeLabel(s)}
-                  </option>
-                ))}
+{LICENSE_SUBTYPES.map((s) => (
+  <option key={s} value={s}>
+    {getLicenseSubtypeLabel(s as any)}
+  </option>
+))}
               </select>
 
               {!licenseSubtypeOk && (
