@@ -238,7 +238,7 @@ async function handleSubmit(payload: NewAbsencePayload) {
                   to: editing.to,
                   type: editing.type,
                   note: editing.note ?? "",
-                  subtype: (editing.subtype as NewAbsencePayload["subtype"]),
+                  subtype: editing.subtype as any,
                   hours: editing.hours ?? null,
                 }
               : undefined
