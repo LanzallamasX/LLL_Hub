@@ -44,17 +44,17 @@ export function getAbsenceTypeLabel(type: AbsenceTypeId, subtype?: LicenseSubtyp
 
 export function getLicenseSubtypeLabel(subtype: LicenseSubtype) {
   switch (subtype) {
-    case "ATENCION_GRUPO_FAMILIAR": return "Licencia atención del grupo familiar";
+    case "TURNO_MEDICO": return "Turno médico";
+    case "TRAMITE_PERSONAL": return "Trámite personal";    
+    case "RAZONES_PARTICULARES_LCT": return "Razones particulares (LCT)";
     case "CUMPLEANIOS_LIBRE": return "Día de cumpleaños libre";
+    case "ATENCION_GRUPO_FAMILIAR": return "Licencia atención del grupo familiar";
+    case "MUDANZA": return "Mudanza";
     case "EXAMEN": return "Examen (Enseñanza Media o Universitaria)";
-    case "FALLECIMIENTO_CONYUGE_HIJO_PADRES": return "Fallecimiento cónyuge/unión convivencial, hijo o padres";
-    case "FALLECIMIENTO_HERMANO": return "Fallecimiento hermano/a";
     case "PATERNIDAD": return "Paternidad";
     case "MATERNIDAD": return "Maternidad";
-    case "MUDANZA": return "Mudanza";
-    case "RAZONES_PARTICULARES_LCT": return "Razones particulares (LCT)";
-    case "TRAMITE_PERSONAL": return "Trámite personal";
-    case "TURNO_MEDICO": return "Turno médico";
+    case "FALLECIMIENTO_CONYUGE_HIJO_PADRES": return "Fallecimiento cónyuge/unión convivencial, hijo o padres";
+    case "FALLECIMIENTO_HERMANO": return "Fallecimiento hermano/a";    
     default: return subtype;
   }
 }

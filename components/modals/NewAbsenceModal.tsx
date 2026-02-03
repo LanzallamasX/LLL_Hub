@@ -59,17 +59,17 @@ type Props = {
 
 // ✅ Tipamos la lista con el LicenseSubtype REAL (importado)
 const LICENSE_SUBTYPES: readonly LicenseSubtype[] = [
+  "TURNO_MEDICO",  
+  "CUMPLEANIOS_LIBRE",  
+  "TRAMITE_PERSONAL",  
   "ATENCION_GRUPO_FAMILIAR",
-  "CUMPLEANIOS_LIBRE",
+  "MUDANZA",
+  "RAZONES_PARTICULARES_LCT",  
   "EXAMEN",
+  "PATERNIDAD",
+  "MATERNIDAD",  
   "FALLECIMIENTO_CONYUGE_HIJO_PADRES",
   "FALLECIMIENTO_HERMANO",
-  "PATERNIDAD",
-  "MATERNIDAD",
-  "MUDANZA",
-  "RAZONES_PARTICULARES_LCT",
-  "TRAMITE_PERSONAL",
-  "TURNO_MEDICO",
 ];
 
 function toLicenseSubtype(value: string | null): LicenseSubtype | null {
