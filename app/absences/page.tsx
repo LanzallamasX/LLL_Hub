@@ -13,9 +13,14 @@ import { useAuth } from "@/contexts/AuthContext";
 
 import type { Absence } from "@/lib/supabase/absences";
 
-//para mostrar ausencias usadas
+// para mostrar ausencias usadas
 import { computeUsageByBalanceKey } from "@/lib/balances/usage";
 
+// ✅ balance vacaciones desde DB (ventana 3 años / buckets)
+import { fetchMyVacationBalance, type VacationBalance } from "@/lib/supabase/vacations";
+
+// ✅ adapter shared con Dashboard (evita duplicar lógica)
+import { toVacationInfoForModalFromBuckets } from "@/lib/vacations/adapters";
 
 type Filter = "todas" | "pendiente" | "aprobado" | "rechazado";
 
@@ -41,6 +46,11 @@ export default function MyAbsencesPage() {
   // Evita doble load en dev (StrictMode)
   const didLoad = useRef(false);
 
+  // ✅ Vacaciones DB
+  const [vacDb, setVacDb] = useState<VacationBalance | null>(null);
+  const [vacDbLoading, setVacDbLoading] = useState(false);
+
+  // 1) Gate + load absences
   useEffect(() => {
     if (isLoading) return;
 
@@ -54,6 +64,30 @@ export default function MyAbsencesPage() {
       loadMyAbsences(userId);
     }
   }, [isLoading, isAuthed, userId, router, loadMyAbsences]);
+
+  // 2) Traer balance vacaciones (para barrita del modal)
+  useEffect(() => {
+    if (!isAuthed || !userId) return;
+
+    let alive = true;
+    (async () => {
+      try {
+        setVacDbLoading(true);
+        const b = await fetchMyVacationBalance();
+        if (!alive) return;
+        setVacDb(b);
+      } catch {
+        if (!alive) return;
+        setVacDb(null);
+      } finally {
+        if (alive) setVacDbLoading(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [isAuthed, userId]);
 
   const currentUser = useMemo(
     () => ({
@@ -85,12 +119,16 @@ export default function MyAbsencesPage() {
     return [...items].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [myAbsences, filter, query]);
 
+  // para ausencias usadas
+  const usageByKey = useMemo(() => {
+    const y = new Date().getFullYear();
+    return computeUsageByBalanceKey(myAbsences, y);
+  }, [myAbsences]);
 
-    // para ausencias usadas
-const usageByKey = useMemo(() => {
-  const y = new Date().getFullYear();
-  return computeUsageByBalanceKey(myAbsences, y);
-}, [myAbsences]);
+  // ✅ MISMO criterio que Dashboard, sin duplicación
+  const vacationInfoForModal = useMemo(() => {
+    return toVacationInfoForModalFromBuckets(vacDb);
+  }, [vacDb]);
 
   function openCreate() {
     setEditing(null);
@@ -107,43 +145,40 @@ const usageByKey = useMemo(() => {
     setEditing(null);
   }
 
-async function handleSubmit(payload: NewAbsencePayload) {
-  if (editing) {
-    if (editing.status !== "pendiente") {
+  async function handleSubmit(payload: NewAbsencePayload) {
+    if (editing) {
+      if (editing.status !== "pendiente") {
+        closeModal();
+        return;
+      }
+
+      await updateAbsence(editing.id, {
+        from: payload.from,
+        to: payload.to,
+        type: payload.type,
+        note: payload.note,
+        subtype: payload.subtype ?? null,
+        hours: payload.hours ?? null,
+      });
+
       closeModal();
       return;
     }
 
-    await updateAbsence(editing.id, {
+    await createAbsence({
+      userId: currentUser.userId,
+      userName: currentUser.userName,
       from: payload.from,
       to: payload.to,
       type: payload.type,
       note: payload.note,
-
-      // ✅ NUEVO
       subtype: payload.subtype ?? null,
       hours: payload.hours ?? null,
     });
 
     closeModal();
-    return;
   }
 
-  await createAbsence({
-    userId: currentUser.userId,
-    userName: currentUser.userName,
-    from: payload.from,
-    to: payload.to,
-    type: payload.type,
-    note: payload.note,
-
-    // ✅ NUEVO
-    subtype: payload.subtype ?? null,
-    hours: payload.hours ?? null,
-  });
-
-  closeModal();
-}
   // Gates
   if (isLoading) {
     return (
@@ -166,15 +201,23 @@ async function handleSubmit(payload: NewAbsencePayload) {
   }
 
   return (
-    <UserLayout mode="user" header={{ title: "Mis ausencias", subtitle: "Historial y gestión de tus solicitudes." }}>
+    <UserLayout
+      mode="user"
+      header={{
+        title: "Mis ausencias",
+        subtitle: "Historial y gestión de tus solicitudes.",
+      }}
+    >
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">Mis ausencias</h1>
           <p className="mt-1 text-sm text-lll-text-soft">
             Creá solicitudes, revisá estados y editá mientras estén pendientes.
           </p>
+
           {absLoading && <p className="mt-1 text-[12px] text-lll-text-soft">Cargando…</p>}
           {absError && <p className="mt-1 text-[12px] text-red-300">{absError}</p>}
+          {vacDbLoading && <p className="mt-1 text-[12px] text-lll-text-soft">Cargando vacaciones…</p>}
         </div>
 
         <button
@@ -232,21 +275,24 @@ async function handleSubmit(payload: NewAbsencePayload) {
         onClose={closeModal}
         onSubmit={handleSubmit}
         initial={
-            editing
-              ? {
-                  from: editing.from,
-                  to: editing.to,
-                  type: editing.type,
-                  note: editing.note ?? "",
-                  subtype: editing.subtype as any,
-                  hours: editing.hours ?? null,
-                }
-              : undefined
-          }
+          editing
+            ? {
+                from: editing.from,
+                to: editing.to,
+                type: editing.type,
+                note: editing.note ?? "",
+                subtype: editing.subtype as any,
+                hours: editing.hours ?? null,
+              }
+            : undefined
+        }
         submitLabel={editing ? "Guardar cambios" : "Enviar"}
         title={editing ? "Editar solicitud" : "Nueva solicitud"}
         subtitle={editing ? "Podés editar mientras esté pendiente." : "Completá los datos y enviá la solicitud."}
         usageByKey={usageByKey}
+        // ✅ barrita vacaciones (igual que dashboard)
+        vacationInfo={vacationInfoForModal ?? undefined}
+        vacationAvailable={vacationInfoForModal?.available ?? undefined}
       />
     </UserLayout>
   );

@@ -164,14 +164,15 @@ export async function updateAbsenceStatus(
   id: string,
   status: AbsenceStatus
 ): Promise<Absence> {
-  const { data, error } = await supabase
-    .from("absences")
-    .update({ status })
-    .eq("id", id)
-    .select(ABSENCE_SELECT_WITH_DECIDER)
-    .single();
+  const { data, error } = await supabase.rpc("set_absence_status", {
+    p_absence_id: id,
+    p_status: status,
+  });
 
   if (error) throw error;
+
+  // OJO: si tu RPC retorna un row "absences" sin join, decided_by_profile no va a venir.
+  // Lo manejamos igual: mapRowToAbsence tolera decided_by_profile undefined.
   return mapRowToAbsence(data as any);
 }
 
@@ -195,7 +196,8 @@ export async function approveAbsence(id: string, deduction?: DeductionPayload) {
     throw error;
   }
 
-  return mapRowToAbsence(data as any);
+  // ✅ aseguramos decided_by/decided_at por DB
+  return updateAbsenceStatus(id, "aprobado");
 }
 
 export async function rejectAbsence(id: string) {

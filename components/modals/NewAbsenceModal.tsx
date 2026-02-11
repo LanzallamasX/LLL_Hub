@@ -31,11 +31,11 @@ export type NewAbsencePayload = {
 
 type Usage = { used: number; unit: PolicyUnit };
 
-type VacationInfo = {
-  entitlement: number; // cupo del año
-  carryover: number;   // acumulado
-  usedThisYear: number;// usado
-  available: number;   // disponible
+export type VacationInfo = {
+  entitlement: number; // cupo anual (bucket actual)
+  carryover: number;   // acumulado (remanente buckets anteriores vivos)
+  usedThisYear: number;// usado (ventana 3 años / fifo)
+  available: number;   // disponible (ventana 3 años / fifo)
 };
 
 type Props = {
@@ -50,8 +50,8 @@ type Props = {
   /** Backward compat: si solo pasás available, sigue andando */
   vacationAvailable?: number;
 
-  /** ✅ Recomendado: info completa de vacaciones (computeVacationBalance) */
-  vacationInfo?: VacationInfo;
+  /** ✅ Recomendado: info completa (cupo/acum/usado/disponible) */
+  vacationInfo?: VacationInfo | null;
 
   /** MVP: usado por balanceKey calculado desde ausencias aprobadas */
   usageByKey?: Map<BalanceKey, Usage>;
@@ -59,24 +59,38 @@ type Props = {
 
 // ✅ Tipamos la lista con el LicenseSubtype REAL (importado)
 const LICENSE_SUBTYPES: readonly LicenseSubtype[] = [
-  "TURNO_MEDICO",  
-  "CUMPLEANIOS_LIBRE",  
-  "TRAMITE_PERSONAL",  
+  "TURNO_MEDICO",
+  "CUMPLEANIOS_LIBRE",
+  "TRAMITE_PERSONAL",
   "ATENCION_GRUPO_FAMILIAR",
   "MUDANZA",
-  "RAZONES_PARTICULARES_LCT",  
+  "RAZONES_PARTICULARES_LCT",
   "EXAMEN",
   "PATERNIDAD",
-  "MATERNIDAD",  
+  "MATERNIDAD",
   "FALLECIMIENTO_CONYUGE_HIJO_PADRES",
   "FALLECIMIENTO_HERMANO",
 ];
 
-function toLicenseSubtype(value: string | null): LicenseSubtype | null {
-  if (!value) return null;
-  return (LICENSE_SUBTYPES as readonly string[]).includes(value)
-    ? (value as LicenseSubtype)
-    : null;
+function StatBar({
+  left,
+  right,
+}: {
+  left: React.ReactNode;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-xl bg-blue-500/90 text-white px-4 py-3 text-[13px] leading-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">{left}</div>
+        {right ? <div className="text-white/90">{right}</div> : null}
+      </div>
+    </div>
+  );
+}
+
+function Sep() {
+  return <span className="mx-1.5 text-white/70">|</span>;
 }
 
 export default function NewAbsenceModal({
@@ -86,7 +100,7 @@ export default function NewAbsenceModal({
   initial,
   submitLabel = "Enviar",
   title = "Nueva solicitud",
-  subtitle = "MVP visual. Luego lo conectamos al backend.",
+  subtitle = "Completá los datos y enviá la solicitud.",
   vacationAvailable,
   vacationInfo,
   usageByKey,
@@ -98,7 +112,6 @@ export default function NewAbsenceModal({
   );
   const [note, setNote] = useState(initial?.note ?? "");
 
-  // ✅ subtype: usa el LicenseSubtype importado
   const [subtype, setSubtype] = useState<LicenseSubtype | "">(
     (initial?.subtype as LicenseSubtype | null | undefined) ?? ""
   );
@@ -116,7 +129,6 @@ export default function NewAbsenceModal({
   const policy = useMemo(() => {
     if (isLicense) {
       if (!subtype) return null;
-      // si tu getPolicySafe exige formato específico, podés dejarlo así:
       return getPolicySafe({ type: "licencia" as any, subtype: subtype as any });
     }
     return getPolicySafe({ type: type as any, subtype: null });
@@ -131,6 +143,15 @@ export default function NewAbsenceModal({
     return to >= from;
   }, [from, to, isHourUnit]);
 
+  // Si es por horas, to = from
+  useEffect(() => {
+    if (!open) return;
+    if (!isHourUnit) return;
+    if (!from) return;
+    if (to !== from) setTo(from);
+  }, [open, isHourUnit, from, to]);
+
+  // Uso por política (no vacaciones)
   const usage = useMemo(() => {
     if (!policy?.deducts || !policy.deductsFrom) return null;
 
@@ -157,18 +178,14 @@ export default function NewAbsenceModal({
     }
 
     if (!from || !to || to < from) return false;
+
+    // Para políticas por días, acá usamos diferencia calendario.
+    // Si querés business_days también para algunas políticas, lo extendemos luego.
     const s = new Date(from + "T00:00:00");
     const e = new Date(to + "T00:00:00");
     const days = Math.floor((e.getTime() - s.getTime()) / 86400000) + 1;
     return days > usage.available;
   }, [usage, from, to, hours]);
-
-  useEffect(() => {
-    if (!open) return;
-    if (!isHourUnit) return;
-    if (!from) return;
-    if (to !== from) setTo(from);
-  }, [open, isHourUnit, from, to]);
 
   const requestedDays = useMemo(() => {
     if (!dateRangeOk) return 0;
@@ -177,14 +194,18 @@ export default function NewAbsenceModal({
     return countChargeableDays(from, to, DEFAULT_VACATION_SETTINGS.countMode);
   }, [from, to, dateRangeOk, isVacation]);
 
-  const vacationAvail = vacationInfo?.available ?? vacationAvailable;
-  const hasVacationAvail = typeof vacationAvail === "number";
+  const vacationAvail = useMemo(() => {
+    // prioridad: info completa -> available suelto
+    if (typeof vacationInfo?.available === "number") return vacationInfo.available;
+    if (typeof vacationAvailable === "number") return vacationAvailable;
+    return null;
+  }, [vacationInfo, vacationAvailable]);
 
   const exceedsAvailable = useMemo(() => {
     if (!isVacation) return false;
-    if (!hasVacationAvail) return false;
-    return requestedDays > (vacationAvail ?? 0);
-  }, [isVacation, hasVacationAvail, requestedDays, vacationAvail]);
+    if (vacationAvail == null) return false;
+    return requestedDays > vacationAvail;
+  }, [isVacation, requestedDays, vacationAvail]);
 
   const hoursOk = useMemo(() => {
     if (!isHourUnit) return true;
@@ -199,13 +220,14 @@ export default function NewAbsenceModal({
 
   const canSubmit = useMemo(() => {
     if (!dateRangeOk) return false;
-    if (exceedsAvailable) return false;
+    if (isVacation && exceedsAvailable) return false;
     if (!licenseSubtypeOk) return false;
     if (!hoursOk) return false;
     if (!isVacation && exceedsPolicyAvailable) return false;
     return true;
   }, [dateRangeOk, exceedsAvailable, licenseSubtypeOk, hoursOk, exceedsPolicyAvailable, isVacation]);
 
+  // Reset al abrir
   useEffect(() => {
     if (!open) return;
 
@@ -220,16 +242,9 @@ export default function NewAbsenceModal({
         ? String(initial?.hours)
         : ""
     );
-  }, [
-    open,
-    initial?.from,
-    initial?.to,
-    initial?.type,
-    initial?.note,
-    initial?.subtype,
-    initial?.hours,
-  ]);
+  }, [open, initial?.from, initial?.to, initial?.type, initial?.note, initial?.subtype, initial?.hours]);
 
+  // ESC
   useEffect(() => {
     if (!open) return;
     function onKeyDown(e: KeyboardEvent) {
@@ -258,19 +273,9 @@ export default function NewAbsenceModal({
   if (!open) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-    >
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={title}>
       {/* Overlay */}
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/60"
-        onClick={onClose}
-        aria-label="Cerrar modal"
-      />
+      <button type="button" className="absolute inset-0 bg-black/60" onClick={onClose} aria-label="Cerrar modal" />
 
       {/* Panel */}
       <div
@@ -331,58 +336,81 @@ export default function NewAbsenceModal({
                 }}
               >
                 <option value="">Seleccionar…</option>
-{LICENSE_SUBTYPES.map((s) => (
-  <option key={s} value={s}>
-    {getLicenseSubtypeLabel(s as any)}
-  </option>
-))}
+                {LICENSE_SUBTYPES.map((s) => (
+                  <option key={s} value={s}>
+                    {getLicenseSubtypeLabel(s as any)}
+                  </option>
+                ))}
               </select>
 
               {!licenseSubtypeOk && (
-                <p className="mt-1 text-[12px] text-red-300">
-                  Elegí un subtipo para continuar.
-                </p>
+                <p className="mt-1 text-[12px] text-red-300">Elegí un subtipo para continuar.</p>
               )}
             </div>
           )}
 
-          {/* ✅ Barra VACACIONES con computeVacationBalance (cupo/acum/usado/disponible) */}
-          {isVacation && vacationInfo && (
-            <div className="rounded-xl bg-blue-500/90 text-white px-4 py-3 text-sm">
-              <span className="font-semibold">
-                Cupo: {vacationInfo.entitlement} d
-              </span>
-              <span className="mx-2 opacity-80">|</span>
-              <span>Acum: {vacationInfo.carryover} d</span>
-              <span className="mx-2 opacity-80">|</span>
-              <span>Usado: {vacationInfo.usedThisYear} d</span>
-              <span className="mx-2 opacity-80">|</span>
-              <span>Disponible: {vacationInfo.available} d</span>
-            </div>
-          )}
+          {/* ✅ Barra Vacaciones (consistente con VacationBalanceCard) */}
+          {isVacation ? (
+            vacationInfo ? (
+              <StatBar
+                left={
+                  <>
+                    <span className="font-semibold">Cupo: {vacationInfo.entitlement} d</span>
+                    <Sep />
+                    <span>Acum: {vacationInfo.carryover} d</span>
+                    <Sep />
+                    <span>Usado: {vacationInfo.usedThisYear} d</span>
+                    <Sep />
+                    <span className="font-semibold">Disponible: {vacationInfo.available} d</span>
+                  </>
+                }
+                right={
+                  <span className="text-white/90">
+                    Ventana 3 años · FIFO
+                  </span>
+                }
+              />
+            ) : (
+              // fallback si todavía no llegó vacDb: igual mostramos available si existe
+              vacationAvail != null ? (
+                <StatBar
+                  left={
+                    <>
+                      <span className="font-semibold">Disponible: {vacationAvail} d</span>
+                      <Sep />
+                      <span className="text-white/90">Cargando detalle de cupo/acum…</span>
+                    </>
+                  }
+                />
+              ) : null
+            )
+          ) : null}
 
-          {/* ✅ Barra NALOO genérica (NO vacaciones, para home office/licencias/cumple) */}
-          {!isVacation && usage && usage.allowance != null && (
-            <div className="rounded-xl bg-blue-500/90 text-white px-4 py-3 text-sm">
-              <span className="font-semibold">
-                Por política: {usage.allowance} {usage.unit === "hour" ? "horas" : "días"}
-              </span>
-              <span className="mx-2 opacity-80">|</span>
-              <span>
-                Disponible: {usage.available} {usage.unit === "hour" ? "h" : "d"}
-              </span>
-              <span className="mx-2 opacity-80">|</span>
-              <span>
-                Usado en este ciclo: {usage.used} {usage.unit === "hour" ? "h" : "d"}
-              </span>
-
-              {exceedsPolicyAvailable && (
-                <p className="mt-2 text-[12px] text-white/90">
-                  Te pasás del disponible para esta política.
-                </p>
-              )}
-            </div>
-          )}
+          {/* ✅ Barra Políticas (no vacaciones) */}
+          {!isVacation && usage && usage.allowance != null ? (
+            <StatBar
+              left={
+                <>
+                  <span className="font-semibold">
+                    Por política: {usage.allowance} {usage.unit === "hour" ? "horas" : "días"}
+                  </span>
+                  <Sep />
+                  <span>
+                    Disponible: {usage.available} {usage.unit === "hour" ? "h" : "d"}
+                  </span>
+                  <Sep />
+                  <span>
+                    Usado: {usage.used} {usage.unit === "hour" ? "h" : "d"}
+                  </span>
+                </>
+              }
+              right={
+                exceedsPolicyAvailable ? (
+                  <span className="text-white/90">Te pasás del disponible</span>
+                ) : null
+              }
+            />
+          ) : null}
 
           {/* Fechas / Horas */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -410,11 +438,9 @@ export default function NewAbsenceModal({
                   onChange={(e) => setHours(e.target.value)}
                   placeholder="Ej: 6"
                 />
-                {!hoursOk && (
-                  <p className="mt-1 text-[12px] text-red-300">
-                    Ingresá horas válidas (mayor a 0).
-                  </p>
-                )}
+                {!hoursOk ? (
+                  <p className="mt-1 text-[12px] text-red-300">Ingresá horas válidas (mayor a 0).</p>
+                ) : null}
               </div>
             ) : (
               <div>
@@ -430,25 +456,25 @@ export default function NewAbsenceModal({
           </div>
 
           {/* Info dinámica (vacaciones) */}
-          {isVacation && dateRangeOk && (
+          {isVacation && dateRangeOk ? (
             <div className="rounded-xl border border-lll-border bg-lll-bg-softer p-3 text-sm">
               <div className="flex items-center justify-between gap-3">
                 <span className="text-lll-text-soft">Solicitado</span>
                 <span className="font-semibold">{requestedDays} día(s)</span>
               </div>
 
-              {hasVacationAvail && (
+              {vacationAvail != null ? (
                 <div className="mt-1 flex items-center justify-between gap-3">
-                  <span className="text-lll-text-soft">Disponibles</span>
+                  <span className="text-lll-text-soft">Disponible</span>
                   <span className="font-semibold">{vacationAvail}</span>
                 </div>
-              )}
+              ) : null}
 
-              {exceedsAvailable && (
+              {exceedsAvailable ? (
                 <p className="mt-2 text-[12px] text-red-300">
                   Te faltan {requestedDays - (vacationAvail ?? 0)} día(s) para cubrir esta solicitud.
                 </p>
-              )}
+              ) : null}
 
               <p className="mt-2 text-[12px] text-lll-text-soft">
                 Conteo:{" "}
@@ -457,7 +483,7 @@ export default function NewAbsenceModal({
                   : "Calendario (incluye sáb/dom)"}
               </p>
             </div>
-          )}
+          ) : null}
 
           {/* Comentario */}
           <div>
@@ -493,11 +519,9 @@ export default function NewAbsenceModal({
             </button>
           </div>
 
-          {typeDef && typeDef.requiresApproval === false && (
-            <p className="text-[12px] text-lll-text-soft">
-              Este tipo no requiere aprobación.
-            </p>
-          )}
+          {typeDef && typeDef.requiresApproval === false ? (
+            <p className="text-[12px] text-lll-text-soft">Este tipo no requiere aprobación.</p>
+          ) : null}
         </div>
       </div>
     </div>

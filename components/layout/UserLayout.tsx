@@ -119,13 +119,13 @@ export default function UserLayout({
                 className={navLinkClass(isOwnerBalancesEmployeesActive)}
               >
                 <span className="w-2 h-2 rounded bg-sky-400" />
-                Balances por empleado
+                Balance anual por empleado
               </Link>
             </>
           ) : (
             <Link href={myBalancesHref} className={navLinkClass(isMyBalancesActive)}>
               <span className="w-2 h-2 rounded bg-emerald-400" />
-              Balances
+              Balance anual
             </Link>
           )}
 
