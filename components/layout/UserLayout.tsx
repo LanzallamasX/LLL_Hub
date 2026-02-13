@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import AppHeader from "@/components/ui/AppHeader";
 import { useAuth } from "@/contexts/AuthContext";
+import HeaderNotifications from "@/components/layout/HeaderNotifications";
 
 type LayoutMode = "user" | "owner";
 
@@ -197,6 +198,9 @@ export default function UserLayout({
               </span>
             </div>
 
+
+
+
             <div className="flex items-center gap-3">
               {effectiveMode === "owner" && (
                 <input
@@ -205,9 +209,22 @@ export default function UserLayout({
                 />
               )}
 
+
+              <div className="flex items-center gap-3">
+                {/* ...tu search */}
+                <HeaderNotifications enabled />
+                {/* ...tu user menu / salir */}
+              </div>
               <AppHeader title="" subtitle="" />
+
+
+
             </div>
+
+
+
           </div>
+          
         </header>
 
         <main className="flex-1">
