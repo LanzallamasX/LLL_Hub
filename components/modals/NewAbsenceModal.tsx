@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { prettySupabaseError } from "@/lib/supabase/errors";
 
 import {
   ABSENCE_TYPES,
@@ -18,6 +19,8 @@ import {
 
 import { countChargeableDays } from "@/lib/vacations/dateCount";
 import { DEFAULT_VACATION_SETTINGS } from "@/lib/vacations/settings";
+
+import { findOverlappingAbsence, type AbsenceLike } from "@/lib/absences/overlap";
 
 export type NewAbsencePayload = {
   from: string;
@@ -41,7 +44,13 @@ export type VacationInfo = {
 type Props = {
   open: boolean;
   onClose: () => void;
+
+  /**
+   * onSubmit debería lanzar (throw) si falla.
+   * Ej: si Supabase devuelve error, throw error.
+   */
   onSubmit: (payload: NewAbsencePayload) => void | Promise<void>;
+
   initial?: Partial<NewAbsencePayload>;
   submitLabel?: string;
   title?: string;
@@ -55,6 +64,10 @@ type Props = {
 
   /** MVP: usado por balanceKey calculado desde ausencias aprobadas */
   usageByKey?: Map<BalanceKey, Usage>;
+
+  /** ✅ NUEVO: para bloquear solapamientos en UI */
+  existingAbsences?: AbsenceLike[]; // típicamente tus myAbsences mapeadas
+  ignoreAbsenceId?: string;         // cuando editás
 };
 
 // ✅ Tipamos la lista con el LicenseSubtype REAL (importado)
@@ -104,6 +117,8 @@ export default function NewAbsenceModal({
   vacationAvailable,
   vacationInfo,
   usageByKey,
+  existingAbsences,
+  ignoreAbsenceId,
 }: Props) {
   const [from, setFrom] = useState(initial?.from ?? "");
   const [to, setTo] = useState(initial?.to ?? "");
@@ -121,6 +136,10 @@ export default function NewAbsenceModal({
       ? String(initial?.hours)
       : ""
   );
+
+  // ✅ Error visible y estado de envío
+  const [submitError, setSubmitError] = useState<string>("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const typeDef = useMemo(() => getAbsenceType(type), [type]);
   const isVacation = type === "vacaciones";
@@ -151,6 +170,30 @@ export default function NewAbsenceModal({
     if (to !== from) setTo(from);
   }, [open, isHourUnit, from, to]);
 
+  // ✅ NUEVO: detectar solapamiento (solo para rangos válidos)
+  const overlapAbsence = useMemo(() => {
+    if (!existingAbsences?.length) return null;
+    if (!from) return null;
+
+    // rango efectivo
+    const rangeFrom = from;
+    const rangeTo = isHourUnit ? from : to;
+
+    if (!rangeTo) return null;
+    if (rangeTo < rangeFrom) return null;
+
+    return findOverlappingAbsence(existingAbsences, rangeFrom, rangeTo, {
+      ignoreId: ignoreAbsenceId,
+      statuses: ["pendiente", "aprobado"], // ✅ solo estas bloquean
+    });
+  }, [existingAbsences, from, to, isHourUnit, ignoreAbsenceId]);
+
+  const overlapErrorMsg = useMemo(() => {
+    if (!overlapAbsence) return "";
+    const estado = overlapAbsence.status === "aprobado" ? "aprobada" : "pendiente";
+    return `Ese rango se solapa con una ausencia ${estado} (${overlapAbsence.from} → ${overlapAbsence.to}). Elegí otras fechas.`;
+  }, [overlapAbsence]);
+
   // Uso por política (no vacaciones)
   const usage = useMemo(() => {
     if (!policy?.deducts || !policy.deductsFrom) return null;
@@ -179,8 +222,7 @@ export default function NewAbsenceModal({
 
     if (!from || !to || to < from) return false;
 
-    // Para políticas por días, acá usamos diferencia calendario.
-    // Si querés business_days también para algunas políticas, lo extendemos luego.
+    // Para políticas por días: diferencia calendario
     const s = new Date(from + "T00:00:00");
     const e = new Date(to + "T00:00:00");
     const days = Math.floor((e.getTime() - s.getTime()) / 86400000) + 1;
@@ -195,7 +237,6 @@ export default function NewAbsenceModal({
   }, [from, to, dateRangeOk, isVacation]);
 
   const vacationAvail = useMemo(() => {
-    // prioridad: info completa -> available suelto
     if (typeof vacationInfo?.available === "number") return vacationInfo.available;
     if (typeof vacationAvailable === "number") return vacationAvailable;
     return null;
@@ -219,13 +260,24 @@ export default function NewAbsenceModal({
   }, [isLicense, subtype]);
 
   const canSubmit = useMemo(() => {
+    if (isSubmitting) return false; // ✅ no doble submit
     if (!dateRangeOk) return false;
+    if (overlapAbsence) return false; // ✅ BLOQUEO POR SOLAPAMIENTO
     if (isVacation && exceedsAvailable) return false;
     if (!licenseSubtypeOk) return false;
     if (!hoursOk) return false;
     if (!isVacation && exceedsPolicyAvailable) return false;
     return true;
-  }, [dateRangeOk, exceedsAvailable, licenseSubtypeOk, hoursOk, exceedsPolicyAvailable, isVacation]);
+  }, [
+    isSubmitting,
+    dateRangeOk,
+    overlapAbsence,
+    isVacation,
+    exceedsAvailable,
+    licenseSubtypeOk,
+    hoursOk,
+    exceedsPolicyAvailable,
+  ]);
 
   // Reset al abrir
   useEffect(() => {
@@ -242,7 +294,19 @@ export default function NewAbsenceModal({
         ? String(initial?.hours)
         : ""
     );
-  }, [open, initial?.from, initial?.to, initial?.type, initial?.note, initial?.subtype, initial?.hours]);
+
+    // ✅ limpia error al abrir
+    setSubmitError("");
+    setIsSubmitting(false);
+  }, [
+    open,
+    initial?.from,
+    initial?.to,
+    initial?.type,
+    initial?.note,
+    initial?.subtype,
+    initial?.hours,
+  ]);
 
   // ESC
   useEffect(() => {
@@ -257,6 +321,9 @@ export default function NewAbsenceModal({
   async function handleSubmit() {
     if (!canSubmit) return;
 
+    setSubmitError("");
+    setIsSubmitting(true);
+
     const payload: NewAbsencePayload = {
       from,
       to: isHourUnit ? from : to,
@@ -266,16 +333,31 @@ export default function NewAbsenceModal({
       hours: isHourUnit ? Number(hours) : null,
     };
 
-    await onSubmit(payload);
-    onClose();
+    try {
+      await onSubmit(payload);
+      onClose(); // ✅ solo cierra si fue OK
+    } catch (err: any) {
+      setSubmitError(prettySupabaseError(err));
+      setIsSubmitting(false);
+    }
   }
 
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={title}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+    >
       {/* Overlay */}
-      <button type="button" className="absolute inset-0 bg-black/60" onClick={onClose} aria-label="Cerrar modal" />
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/60"
+        onClick={onClose}
+        aria-label="Cerrar modal"
+      />
 
       {/* Panel */}
       <div
@@ -293,12 +375,27 @@ export default function NewAbsenceModal({
             onClick={onClose}
             aria-label="Cerrar"
             type="button"
+            disabled={isSubmitting}
           >
             ✕
           </button>
         </div>
 
         <div className="p-4 space-y-3">
+          {/* ✅ Error global */}
+          {submitError ? (
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-[13px] text-red-200">
+              {submitError}
+            </div>
+          ) : null}
+
+          {/* ✅ Error preventivo de solapamiento */}
+          {!submitError && overlapErrorMsg ? (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-200">
+              {overlapErrorMsg}
+            </div>
+          ) : null}
+
           {/* Tipo */}
           <div>
             <label className="text-[12px] text-lll-text-soft">Tipo</label>
@@ -308,6 +405,7 @@ export default function NewAbsenceModal({
               onChange={(e) => {
                 const next = e.target.value as AbsenceTypeId;
                 setType(next);
+                setSubmitError("");
 
                 if (next !== "licencia") {
                   setSubtype("");
@@ -333,6 +431,7 @@ export default function NewAbsenceModal({
                 onChange={(e) => {
                   setSubtype(e.target.value as any);
                   setHours("");
+                  setSubmitError("");
                 }}
               >
                 <option value="">Seleccionar…</option>
@@ -349,7 +448,7 @@ export default function NewAbsenceModal({
             </div>
           )}
 
-          {/* ✅ Barra Vacaciones (consistente con VacationBalanceCard) */}
+          {/* ✅ Barra Vacaciones */}
           {isVacation ? (
             vacationInfo ? (
               <StatBar
@@ -364,26 +463,19 @@ export default function NewAbsenceModal({
                     <span className="font-semibold">Disponible: {vacationInfo.available} d</span>
                   </>
                 }
-                right={
-                  <span className="text-white/90">
-                    Ventana 3 años · FIFO
-                  </span>
+                right={<span className="text-white/90">Ventana 3 años · FIFO</span>}
+              />
+            ) : vacationAvail != null ? (
+              <StatBar
+                left={
+                  <>
+                    <span className="font-semibold">Disponible: {vacationAvail} d</span>
+                    <Sep />
+                    <span className="text-white/90">Cargando detalle de cupo/acum…</span>
+                  </>
                 }
               />
-            ) : (
-              // fallback si todavía no llegó vacDb: igual mostramos available si existe
-              vacationAvail != null ? (
-                <StatBar
-                  left={
-                    <>
-                      <span className="font-semibold">Disponible: {vacationAvail} d</span>
-                      <Sep />
-                      <span className="text-white/90">Cargando detalle de cupo/acum…</span>
-                    </>
-                  }
-                />
-              ) : null
-            )
+            ) : null
           ) : null}
 
           {/* ✅ Barra Políticas (no vacaciones) */}
@@ -404,25 +496,22 @@ export default function NewAbsenceModal({
                   </span>
                 </>
               }
-              right={
-                exceedsPolicyAvailable ? (
-                  <span className="text-white/90">Te pasás del disponible</span>
-                ) : null
-              }
+              right={exceedsPolicyAvailable ? <span className="text-white/90">Te pasás del disponible</span> : null}
             />
           ) : null}
 
           {/* Fechas / Horas */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
-              <label className="text-[12px] text-lll-text-soft">
-                {isHourUnit ? "Fecha" : "Desde"}
-              </label>
+              <label className="text-[12px] text-lll-text-soft">{isHourUnit ? "Fecha" : "Desde"}</label>
               <input
                 className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none"
                 type="date"
                 value={from}
-                onChange={(e) => setFrom(e.target.value)}
+                onChange={(e) => {
+                  setFrom(e.target.value);
+                  setSubmitError("");
+                }}
               />
             </div>
 
@@ -435,7 +524,10 @@ export default function NewAbsenceModal({
                   min={0}
                   step={0.5}
                   value={hours}
-                  onChange={(e) => setHours(e.target.value)}
+                  onChange={(e) => {
+                    setHours(e.target.value);
+                    setSubmitError("");
+                  }}
                   placeholder="Ej: 6"
                 />
                 {!hoursOk ? (
@@ -449,7 +541,10 @@ export default function NewAbsenceModal({
                   className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none"
                   type="date"
                   value={to}
-                  onChange={(e) => setTo(e.target.value)}
+                  onChange={(e) => {
+                    setTo(e.target.value);
+                    setSubmitError("");
+                  }}
                 />
               </div>
             )}
@@ -492,7 +587,10 @@ export default function NewAbsenceModal({
               className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none min-h-[90px]"
               placeholder="Opcional..."
               value={note}
-              onChange={(e) => setNote(e.target.value)}
+              onChange={(e) => {
+                setNote(e.target.value);
+                setSubmitError("");
+              }}
             />
           </div>
 
@@ -501,6 +599,7 @@ export default function NewAbsenceModal({
               onClick={onClose}
               className="px-4 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-lll-text"
               type="button"
+              disabled={isSubmitting}
             >
               Cancelar
             </button>
@@ -515,7 +614,7 @@ export default function NewAbsenceModal({
               }`}
               type="button"
             >
-              {submitLabel}
+              {isSubmitting ? "Enviando..." : submitLabel}
             </button>
           </div>
 

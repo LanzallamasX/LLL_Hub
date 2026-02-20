@@ -38,7 +38,8 @@ let q = supabase
       id,type,title,body,actor_id,entity_type,entity_id,created_at
     )
   `)
-  .order("created_at", { foreignTable: "notifications", ascending: false })
+  // 👇 ordena por la tabla joineada (alias "notification")
+  .order("created_at", { foreignTable: "notification", ascending: false })
   .limit(limit);
 
   if (params?.onlyUnread) {
@@ -55,7 +56,9 @@ let q = supabase
       readAt: r.read_at,
       createdAt: r.notification.created_at,
       notification: r.notification,
-    }));
+    }))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt)); // 👈 NEW → OLD
+
 }
 
 export async function countMyUnreadNotifications(): Promise<number> {

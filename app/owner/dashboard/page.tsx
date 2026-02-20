@@ -10,6 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { getAbsenceTypeLabel } from "@/lib/absenceTypes";
 
 import { formatAR, formatARDateTime } from "@/lib/date";
+import { useSearchParams } from "next/navigation";
 
 
 // Si tu tipo de ausencia tiene union, esto ayuda a no equivocarnos:
@@ -51,6 +52,11 @@ export default function OwnerDashboardPage() {
   // Busy por item para evitar doble click
   const [busyId, setBusyId] = useState<string | null>(null);
 
+  const searchParams = useSearchParams();
+  const focusId = searchParams.get("focus");
+
+  
+
   // Redirects
   useEffect(() => {
     if (isLoading) return;
@@ -76,6 +82,8 @@ export default function OwnerDashboardPage() {
     }
   }, [isLoading, isAuthed, userId, role, loadAllAbsences]);
 
+
+
   const visibleItems = useMemo(() => {
     const q = query.trim().toLowerCase();
 
@@ -94,6 +102,21 @@ export default function OwnerDashboardPage() {
 
     return [...items].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [absences, filter, query]);
+
+
+ 
+
+    useEffect(() => {
+    if (!focusId) return;
+    if (visibleItems.length === 0) return;
+
+    const el = document.getElementById(`absence-${focusId}`);
+    if (!el) return;
+
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [focusId, visibleItems.length]);  
+
+  
 
   async function changeStatus(id: string, next: AbsenceStatus, current: AbsenceStatus) {
     // Confirmación solo para acciones negativas (rechazar)
@@ -216,7 +239,12 @@ export default function OwnerDashboardPage() {
           return (
             <div
               key={a.id}
-              className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4"
+              id={`absence-${a.id}`}
+              className={`rounded-2xl border bg-lll-bg-soft p-4 transition ${
+                focusId === a.id
+                  ? "border-lll-accent shadow-[0_0_0_2px_rgba(255,200,0,0.15)]"
+                  : "border-lll-border"
+              }`}
             >
               <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                 <div className="min-w-0">

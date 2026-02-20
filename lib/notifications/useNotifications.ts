@@ -21,36 +21,43 @@ export function useNotifications(opts?: { enabled?: boolean; pollMs?: number; li
 
   const timerRef = useRef<number | null>(null);
 
-  const refresh = useCallback(async () => {
-    if (!enabled) return;
+  const refresh = useCallback(async (): Promise<NotificationInboxItem[] | null> => {
+    if (!enabled) return null;
+
     setLoading(true);
     setError(null);
+
     try {
       const [list, cnt] = await Promise.all([
         listMyNotifications({ limit }),
         countMyUnreadNotifications(),
       ]);
+
       setItems(list);
       setUnreadCount(cnt);
+
+      return list; // 👈 clave
     } catch (e: any) {
       setError(e?.message ?? "Error cargando notificaciones.");
+      return null;
     } finally {
       setLoading(false);
     }
   }, [enabled, limit]);
 
-  const markRead = useCallback(async (notificationIds: string[]) => {
-    await markNotificationsRead(notificationIds);
-    // optimistic refresh
-    await refresh();
-  }, [refresh]);
+  const markRead = useCallback(
+    async (notificationIds: string[]) => {
+      await markNotificationsRead(notificationIds);
+      await refresh();
+    },
+    [refresh]
+  );
 
   useEffect(() => {
     if (!enabled) return;
 
     refresh();
 
-    // polling simple (MVP)
     timerRef.current = window.setInterval(() => {
       refresh();
     }, pollMs);

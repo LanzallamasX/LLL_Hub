@@ -14,9 +14,22 @@ function notifIcon(type: string) {
   return "🔔";
 }
 
+function routeForNotification(n: {
+  type: string;
+  entity_type: string | null;
+  entity_id: string | null;
+}) {
+  if (n.entity_type === "absence" && n.entity_id) {
+    if (n.type === "absence_created") return `/owner/dashboard?focus=${n.entity_id}`;
+    if (n.type === "absence_approved" || n.type === "absence_rejected")
+      return `/dashboard?focus=${n.entity_id}`;
+  }
+  return "/notifications";
+}
+
 export default function HeaderNotifications({ enabled = true }: { enabled?: boolean }) {
   const router = useRouter();
-  const { items, unreadCount, unreadIds, loading, error, markRead, refresh } = useNotifications({
+  const { items, unreadCount, loading, error, markRead, refresh } = useNotifications({
     enabled,
     pollMs: 30000,
     limit: 8,
@@ -53,22 +66,32 @@ export default function HeaderNotifications({ enabled = true }: { enabled?: bool
     return "Notificaciones";
   }, [loading, error]);
 
-async function toggle() {
-  const next = !open;
-  setOpen(next);
+  async function toggle() {
+    const next = !open;
+    setOpen(next);
 
-  if (next) {
-    const fresh = await refresh(); // ideal si refresh devuelve items (te lo pido abajo)
-    const idsToMark =
-      (fresh ?? items)
+    // MVP: al abrir marcamos todas las unread como leídas
+    if (next) {
+      const fresh = await refresh(); // 👈 ahora refresh devuelve lista (ver hook abajo)
+      const idsToMark = (fresh ?? [])
         .filter((it) => !it.readAt)
         .map((it) => it.notificationId);
 
-    if (idsToMark.length) {
-      await markRead(idsToMark);
+      if (idsToMark.length) await markRead(idsToMark);
     }
   }
-}
+
+  async function onClickItem(it: any) {
+    const n = it.notification;
+
+    // marcar esa sola si estaba unread (más “real” que marcar todo)
+    if (!it.readAt) {
+      await markRead([it.notificationId]);
+    }
+
+    setOpen(false);
+    router.push(routeForNotification(n));
+  }
 
   return (
     <div className="relative" ref={panelRef}>
@@ -110,14 +133,10 @@ async function toggle() {
           </div>
 
           <div className="max-h-[420px] overflow-auto">
-            {error ? (
-              <div className="p-4 text-sm text-red-300">{error}</div>
-            ) : null}
+            {error ? <div className="p-4 text-sm text-red-300">{error}</div> : null}
 
             {!error && items.length === 0 ? (
-              <div className="p-4 text-sm text-lll-text-soft">
-                No tenés notificaciones aún.
-              </div>
+              <div className="p-4 text-sm text-lll-text-soft">No tenés notificaciones aún.</div>
             ) : null}
 
             {!error &&
@@ -126,9 +145,11 @@ async function toggle() {
                 const unread = !it.readAt;
 
                 return (
-                  <div
+                  <button
                     key={it.notificationId}
-                    className={`px-4 py-3 border-b border-lll-border ${
+                    type="button"
+                    onClick={() => onClickItem(it)}
+                    className={`w-full text-left px-4 py-3 border-b border-lll-border hover:bg-lll-bg-softer transition ${
                       unread ? "bg-lll-bg-softer" : "bg-lll-bg-soft"
                     }`}
                   >
@@ -137,23 +158,16 @@ async function toggle() {
 
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-3">
-                          <p className={`text-sm font-semibold ${unread ? "" : "text-lll-text"}`}>
-                            {n.title}
-                          </p>
-
+                          <p className="text-sm font-semibold">{n.title}</p>
                           <p className="text-[11px] text-lll-text-soft whitespace-nowrap">
                             {formatARDateTime(n.created_at)}
                           </p>
                         </div>
 
-                        {n.body ? (
-                          <p className="mt-1 text-[12px] text-lll-text-soft">
-                            {n.body}
-                          </p>
-                        ) : null}
+                        {n.body ? <p className="mt-1 text-[12px] text-lll-text-soft">{n.body}</p> : null}
                       </div>
                     </div>
-                  </div>
+                  </button>
                 );
               })}
           </div>

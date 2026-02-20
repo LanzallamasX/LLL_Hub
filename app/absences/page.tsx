@@ -270,30 +270,25 @@ export default function MyAbsencesPage() {
         )}
       </div>
 
-      <NewAbsenceModal
-        open={isModalOpen}
-        onClose={closeModal}
-        onSubmit={handleSubmit}
-        initial={
-          editing
-            ? {
-                from: editing.from,
-                to: editing.to,
-                type: editing.type,
-                note: editing.note ?? "",
-                subtype: editing.subtype as any,
-                hours: editing.hours ?? null,
-              }
-            : undefined
-        }
-        submitLabel={editing ? "Guardar cambios" : "Enviar"}
-        title={editing ? "Editar solicitud" : "Nueva solicitud"}
-        subtitle={editing ? "Podés editar mientras esté pendiente." : "Completá los datos y enviá la solicitud."}
-        usageByKey={usageByKey}
-        // ✅ barrita vacaciones (igual que dashboard)
-        vacationInfo={vacationInfoForModal ?? undefined}
-        vacationAvailable={vacationInfoForModal?.available ?? undefined}
-      />
+<NewAbsenceModal
+  open={isModalOpen}
+  onClose={closeModal}
+  onSubmit={handleSubmit}
+  initial={editing ? { /* ... */ } : undefined}
+  submitLabel={editing ? "Guardar cambios" : "Enviar"}
+  title={editing ? "Editar solicitud" : "Nueva solicitud"}
+  subtitle={editing ? "Podés editar mientras esté pendiente." : "Completá los datos y enviá la solicitud."}
+  usageByKey={usageByKey}
+  vacationInfo={vacationInfoForModal ?? undefined}
+  vacationAvailable={vacationInfoForModal?.available ?? undefined}
+  existingAbsences={myAbsences.map((a) => ({
+    id: a.id,
+    status: a.status,
+    from: a.from,
+    to: a.to,
+  }))}
+  ignoreAbsenceId={editing?.id}
+/>
     </UserLayout>
   );
 }

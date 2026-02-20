@@ -279,29 +279,25 @@ export default function DashboardPage() {
         />
       </div>
 
-      <NewAbsenceModal
-        open={isModalOpen}
-        onClose={closeModal}
-        onSubmit={handleSubmit}
-        initial={
-          editing
-            ? {
-                from: editing.from,
-                to: editing.to,
-                type: editing.type,
-                note: editing.note ?? "",
-                subtype: editing.subtype ?? null,
-                hours: editing.hours ?? null,
-              }
-            : undefined
-        }
-        submitLabel={editing ? "Guardar cambios" : "Enviar"}
-        title={editing ? "Editar solicitud" : "Nueva solicitud"}
-        subtitle={editing ? "Podés editar mientras esté pendiente." : "Revisá tu saldo antes de enviar."}
-        usageByKey={usageByKey}
-        vacationInfo={vacationInfoForModal ?? vacationBalanceFallback}
-        vacationAvailable={vacationInfoForModal?.available ?? vacationBalanceFallback.available}
-      />
+<NewAbsenceModal
+  open={isModalOpen}
+  onClose={closeModal}
+  onSubmit={handleSubmit}
+  initial={editing ? { /* ... */ } : undefined}
+  submitLabel={editing ? "Guardar cambios" : "Enviar"}
+  title={editing ? "Editar solicitud" : "Nueva solicitud"}
+  subtitle={editing ? "Podés editar mientras esté pendiente." : "Completá los datos y enviá la solicitud."}
+  usageByKey={usageByKey}
+  vacationInfo={vacationInfoForModal ?? undefined}
+  vacationAvailable={vacationInfoForModal?.available ?? undefined}
+  existingAbsences={myAbsences.map((a) => ({
+    id: a.id,
+    status: a.status,
+    from: a.from,
+    to: a.to,
+  }))}
+  ignoreAbsenceId={editing?.id}
+/>
     </UserLayout>
   );
 }
