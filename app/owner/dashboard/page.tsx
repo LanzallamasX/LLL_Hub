@@ -54,8 +54,17 @@ export default function OwnerDashboardPage() {
 
   const searchParams = useSearchParams();
   const focusId = searchParams.get("focus");
+  const vacAtParam = searchParams.get("vacAt"); // YYYY-MM-DD
 
   
+
+  
+function isValidDate(v: string | null): v is string {
+  return !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
+}
+
+const vacAt = isValidDate(vacAtParam) ? vacAtParam : null;
+
 
   // Redirects
   useEffect(() => {

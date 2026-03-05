@@ -7,12 +7,11 @@ import BalanceBar from "@/components/balances/BalanceBar";
 
 import { useAbsences } from "@/contexts/AbsencesContext";
 
-import { computeBalanceStatsByKey, buildHistoryRows } from "@/lib/balances/stats";
+import { buildHistoryRows, computeBalanceStatsByKey } from "@/lib/balances/stats";
 import { POLICIES, type BalanceKey, type PolicyUnit } from "@/lib/absencePolicies";
 import { getAbsenceTypeLabel } from "@/lib/absenceTypes";
 
-import { computeVacationBalance } from "@/lib/vacations/calc";
-import { DEFAULT_VACATION_SETTINGS } from "@/lib/vacations/settings";
+import { supabase } from "@/lib/supabase/client";
 
 function monthLabel(year: number, month0: number) {
   const d = new Date(year, month0, 1);
@@ -44,6 +43,59 @@ function fmtUnit(unit: PolicyUnit) {
   return unit === "hour" ? "h" : "d";
 }
 
+function endOfMonth(year: number, month0: number) {
+  return new Date(year, month0 + 1, 0);
+}
+function toISODate(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** YYYY-MM-DD -> Date (local, estable) */
+function parseISODate(iso: string) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, (m ?? 1) - 1, d ?? 1);
+}
+
+/** start + months */
+function addMonths(d: Date, months: number) {
+  const x = new Date(d.getTime());
+  x.setMonth(x.getMonth() + months);
+  return x;
+}
+
+/** años completos (antigüedad) al "at" */
+function fullYearsBetween(start: Date, at: Date) {
+  let years = at.getFullYear() - start.getFullYear();
+  const a = new Date(at.getFullYear(), at.getMonth(), at.getDate());
+  const ann = new Date(at.getFullYear(), start.getMonth(), start.getDate());
+  if (a < ann) years -= 1;
+  return Math.max(0, years);
+}
+
+/** tu escala */
+function vacationDaysBySeniority(years: number) {
+  if (years < 5) return 14;
+  if (years < 10) return 21;
+  if (years < 20) return 28;
+  return 35;
+}
+
+/** cupo anual “por antigüedad” (solo informativo) */
+function annualEntitlementBySeniority(startDateISO: string, atISO: string) {
+  const start = parseISODate(startDateISO);
+  const at = parseISODate(atISO);
+
+  // regla: antes de 6 meses, todavía no hay “cupo anual”
+  const cut = addMonths(start, 6);
+  if (at < cut) return 0;
+
+  const years = fullYearsBetween(start, at);
+  return vacationDaysBySeniority(years);
+}
+
 type StatRow = {
   balanceKey: BalanceKey;
   label: string;
@@ -54,15 +106,36 @@ type StatRow = {
   available: number | null;
 };
 
+type VacRpc = {
+  granted: number;
+  used: number;
+  reserved: number;
+  available: number;
+};
+
 export default function BalancesView({
   targetUserId,
   startDateISO,
 }: {
   targetUserId: string;
-  startDateISO?: string | null;
+  startDateISO: string | null;
 }) {
   const { absences, loadMyAbsences } = useAbsences();
   const didLoad = useRef(false);
+
+  // periodo UI
+  const now = new Date();
+  const [year, setYear] = useState(now.getFullYear());
+  const [month0, setMonth0] = useState<number | "all">(now.getMonth());
+  const [selectedKey, setSelectedKey] = useState<BalanceKey | null>(null);
+
+  // UI: buscador + toggle
+  const [q, setQ] = useState("");
+  const [showAll, setShowAll] = useState(false);
+
+  // vacaciones por RPC (owner)
+  const [vacRpc, setVacRpc] = useState<VacRpc | null>(null);
+  const [vacLoading, setVacLoading] = useState(false);
 
   useEffect(() => {
     if (!targetUserId) return;
@@ -72,28 +145,61 @@ export default function BalancesView({
     }
   }, [targetUserId, loadMyAbsences]);
 
-  const now = new Date();
-  const [year, setYear] = useState(now.getFullYear());
-  const [month0, setMonth0] = useState<number | "all">(now.getMonth());
-  const [selectedKey, setSelectedKey] = useState<BalanceKey | null>(null);
-
-  // UI (lista compacta)
-  const [q, setQ] = useState("");
-  const [showAll, setShowAll] = useState(false);
-
   const myAbsences = useMemo(() => {
+    if (!targetUserId) return [];
     return absences.filter((a) => a.userId === targetUserId);
   }, [absences, targetUserId]);
 
-  const vacationBalance = useMemo(() => {
+  // vacAt por URL (si existe)
+  const vacAtFromUrl = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    const sp = new URLSearchParams(window.location.search);
+    const v = (sp.get("vacAt") ?? "").trim();
+    return v || null; // YYYY-MM-DD
+  }, []);
+
+  // fecha "at" efectiva para vacaciones
+  const periodAtISO = useMemo(() => {
+    if (vacAtFromUrl) return vacAtFromUrl;
+    if (month0 === "all") return `${year}-12-31`;
+    return toISODate(endOfMonth(year, month0));
+  }, [vacAtFromUrl, year, month0]);
+
+  // ✅ cupo anual por antigüedad (informativo)
+  const vacAnnualEntitlement = useMemo(() => {
     if (!startDateISO) return null;
-    return computeVacationBalance({
-      absences: myAbsences,
-      currentYear: year,
-      startDateISO,
-      settings: DEFAULT_VACATION_SETTINGS,
-    });
-  }, [myAbsences, year, startDateISO]);
+    return annualEntitlementBySeniority(startDateISO, periodAtISO);
+  }, [startDateISO, periodAtISO]);
+
+  // OWNER RPC: trae balance real
+  useEffect(() => {
+    if (!targetUserId) return;
+
+    (async () => {
+      try {
+        setVacLoading(true);
+
+        const { data, error } = await supabase.rpc("get_vacation_balance_for_user_at", {
+          p_user_id: targetUserId,
+          p_at: periodAtISO,
+        });
+
+        if (error) throw error;
+
+        setVacRpc({
+          granted: Number(data?.granted ?? 0),
+          used: Number(data?.used ?? 0),
+          reserved: Number(data?.reserved ?? 0),
+          available: Number(data?.available ?? 0),
+        });
+      } catch (e) {
+        console.error("OWNER get_vacation_balance_for_user_at error", e);
+        setVacRpc(null);
+      } finally {
+        setVacLoading(false);
+      }
+    })();
+  }, [targetUserId, periodAtISO]);
 
   const statsMap = useMemo(() => {
     const map = computeBalanceStatsByKey(
@@ -102,34 +208,33 @@ export default function BalancesView({
       month0 === "all" ? undefined : month0
     );
 
-    if (vacationBalance) {
+    // ✅ Vacaciones: el gráfico usa el acumulado real (granted)
+    if (vacRpc) {
       map.set("VACATION_DAYS", {
         balanceKey: "VACATION_DAYS",
         unit: "day",
-        allowance: vacationBalance.entitlement + vacationBalance.carryover,
-        used: vacationBalance.usedThisYear,
-        reserved: vacationBalance.reservedThisYear ?? 0,
-        available: vacationBalance.available,
+        allowance: vacRpc.granted, // TOTAL acumulado (para Bar/Donut)
+        used: vacRpc.used,
+        reserved: vacRpc.reserved,
+        available: vacRpc.available,
       });
     }
 
     return map;
-  }, [myAbsences, year, month0, vacationBalance]);
+  }, [myAbsences, year, month0, vacRpc]);
 
   const breakdownCatalog = useMemo(() => {
-    const rows = POLICIES
-      .filter((p) => p.deducts && p.deductsFrom)
-      .map((p) => ({
-        balanceKey: p.deductsFrom as BalanceKey,
-        unit: p.unit as PolicyUnit,
-        allowance: p.allowance ?? null,
-        label:
-          p.type === "licencia"
-            ? getAbsenceTypeLabel("licencia", p.subtype ?? null)
-            : getAbsenceTypeLabel(p.type as any),
-      }));
+    const rows = POLICIES.filter((p) => p.deducts && p.deductsFrom).map((p) => ({
+      balanceKey: p.deductsFrom as BalanceKey,
+      unit: p.unit as PolicyUnit,
+      allowance: p.allowance ?? null,
+      label:
+        p.type === "licencia"
+          ? getAbsenceTypeLabel("licencia", p.subtype ?? null)
+          : getAbsenceTypeLabel(p.type as any),
+    }));
 
-    const byKey = new Map<BalanceKey, typeof rows[number]>();
+    const byKey = new Map<BalanceKey, (typeof rows)[number]>();
     for (const r of rows) if (!byKey.has(r.balanceKey)) byKey.set(r.balanceKey, r);
     return Array.from(byKey.values());
   }, []);
@@ -137,6 +242,7 @@ export default function BalancesView({
   const statsList = useMemo<StatRow[]>(() => {
     const list = breakdownCatalog.map((def) => {
       const s = statsMap.get(def.balanceKey);
+
       const used = s?.used ?? 0;
       const reserved = s?.reserved ?? 0;
 
@@ -189,7 +295,8 @@ export default function BalancesView({
     let list = statsList;
 
     if (hasQuery) {
-      return list.filter((s) => s.label.toLowerCase().includes(query));
+      list = list.filter((s) => s.label.toLowerCase().includes(query));
+      return list;
     }
 
     if (showAll) return list;
@@ -226,8 +333,10 @@ export default function BalancesView({
     return statsList.find((x) => x.balanceKey === selectedKey) ?? null;
   }, [selectedKey, statsList]);
 
+  const showVacInfo = (key: BalanceKey) => key === "VACATION_DAYS";
+
   return (
-    <>
+    <div>
       {/* Top bar */}
       <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -263,6 +372,12 @@ export default function BalancesView({
 
             <p className="md:ml-2 text-[12px] text-lll-text-soft">
               Período: <span className="text-lll-text">{rangeLabel}</span>
+              <span className="ml-2 text-lll-text-soft">
+                · vacAt: <span className="text-lll-text">{periodAtISO}</span>
+              </span>
+              {vacLoading ? (
+                <span className="ml-2 text-lll-text-soft">· (vacaciones cargando…)</span>
+              ) : null}
             </p>
           </div>
 
@@ -274,7 +389,7 @@ export default function BalancesView({
               onClick={() => {
                 if (!exportRows.length) return;
                 downloadCSV(
-                  `balances_${year}_${month0 === "all" ? "all" : month0 + 1}.csv`,
+                  `balances_${targetUserId}_${year}_${month0 === "all" ? "all" : month0 + 1}.csv`,
                   toCSV(exportRows)
                 );
               }}
@@ -285,6 +400,7 @@ export default function BalancesView({
         </div>
       </div>
 
+      {/* Main */}
       <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Left */}
         <div className="lg:col-span-1">
@@ -293,7 +409,9 @@ export default function BalancesView({
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold">Políticas</p>
-                  <p className="text-[12px] text-lll-text-soft truncate">Tocá una para ver el detalle</p>
+                  <p className="text-[12px] text-lll-text-soft truncate">
+                    Tocá una para ver el detalle
+                  </p>
                 </div>
 
                 <label className="flex items-center gap-2 text-[12px] text-lll-text-soft shrink-0">
@@ -318,62 +436,83 @@ export default function BalancesView({
                   {filteredStatsList.length} visible(s)
                   {hiddenCount > 0 ? ` · ${hiddenCount} oculta(s)` : ""}
                 </p>
+                {!showAll && !q.trim() && (
+                  <p className="mt-1 text-[11px] text-lll-text-soft">
+                    Mostrando solo con cupo y disponible &gt; 0.
+                  </p>
+                )}
               </div>
             </div>
 
-            <div className="p-3 max-h-[70vh] overflow-y-auto space-y-3 scrollbar-thin">
-              {filteredStatsList.length === 0 ? (
-                <div className="rounded-2xl border border-lll-border bg-lll-bg-softer p-4 text-[12px] text-lll-text-soft">
-                  No hay políticas visibles con ese criterio. Probá “Mostrar todas” o buscá por nombre.
-                </div>
-              ) : (
-                filteredStatsList.map((s) => {
-                  const active = selectedKey === s.balanceKey;
-                  const unit = fmtUnit(s.unit);
+            <div className="p-3 max-h-[70vh] overflow-y-auto space-y-3">
+              {filteredStatsList.map((s) => {
+                const active = selectedKey === s.balanceKey;
+                const unit = fmtUnit(s.unit);
 
-                  return (
-                    <button
-                      key={s.balanceKey}
-                      type="button"
-                      onClick={() => setSelectedKey(s.balanceKey)}
-                      className={`w-full text-left rounded-2xl border p-4 transition ${
-                        active
-                          ? "border-lll-accent/60 bg-lll-accent-soft"
-                          : "border-lll-border bg-lll-bg-soft hover:bg-lll-bg-softer"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold leading-tight truncate">{s.label}</p>
+                return (
+                  <button
+                    key={s.balanceKey}
+                    type="button"
+                    onClick={() => setSelectedKey(s.balanceKey)}
+                    className={`w-full text-left rounded-2xl border p-4 transition ${
+                      active
+                        ? "border-lll-accent/60 bg-lll-accent-soft"
+                        : "border-lll-border bg-lll-bg-soft hover:bg-lll-bg-softer"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold leading-tight truncate">{s.label}</p>
+
+                        {/* 👇 Para vacaciones mostramos 2 conceptos:
+                            - Total acumulado (lo que usa el gráfico)
+                            - Cupo anual por antigüedad (informativo) */}
+                        {showVacInfo(s.balanceKey) ? (
+                          <div className="mt-1 text-[12px] text-lll-text-soft space-y-0.5">
+                            <div>
+                              Total acumulado:{" "}
+                              <span className="text-lll-text font-semibold">
+                                {s.allowance == null ? "—" : `${s.allowance}${unit}`}
+                              </span>
+                            </div>
+                            <div>
+                              Cupo anual (antigüedad):{" "}
+                              <span className="text-lll-text font-semibold">
+                                {vacAnnualEntitlement == null ? "—" : `${vacAnnualEntitlement}${unit}`}
+                              </span>
+                            </div>
+                          </div>
+                        ) : (
                           <p className="mt-1 text-[12px] text-lll-text-soft">
                             Cupo: {s.allowance == null ? "—" : `${s.allowance}${unit}`}
                           </p>
-                        </div>
-
-                        <div className="text-right shrink-0">
-                          <p className="text-[11px] text-lll-text-soft">Disponible</p>
-                          <p className="text-xl font-bold leading-none">
-                            {s.available == null ? "—" : s.available}
-                            {s.allowance == null ? null : (
-                              <span className="ml-1 text-[12px] font-semibold text-lll-text-soft">
-                                {unit}
-                              </span>
-                            )}
-                          </p>
-                        </div>
+                        )}
                       </div>
 
-                      <BalanceBar
-                        used={s.used}
-                        reserved={s.reserved}
-                        available={s.available}
-                        allowance={s.allowance}
-                        unit={s.unit}
-                      />
-                    </button>
-                  );
-                })
-              )}
+                      <div className="text-right shrink-0">
+                        <p className="text-[11px] text-lll-text-soft">Disponible</p>
+                        <p className="text-xl font-bold leading-none">
+                          {s.available == null ? "—" : s.available}
+                          {s.allowance == null ? null : (
+                            <span className="ml-1 text-[12px] font-semibold text-lll-text-soft">
+                              {unit}
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Bar usa el total acumulado (allowance = granted) */}
+                    <BalanceBar
+                      used={s.used}
+                      reserved={s.reserved}
+                      available={s.available}
+                      allowance={s.allowance}
+                      unit={s.unit}
+                    />
+                  </button>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -386,12 +525,34 @@ export default function BalancesView({
                 <div className="min-w-0">
                   <p className="text-sm font-semibold">Detalle</p>
                   <p className="mt-1 text-lg font-bold truncate">{selected.label}</p>
-                  <p className="mt-1 text-[12px] text-lll-text-soft">
-                    Unidad: {fmtUnit(selected.unit)} · Cupo:{" "}
-                    {selected.allowance == null
-                      ? "—"
-                      : `${selected.allowance}${fmtUnit(selected.unit)}`}
-                  </p>
+
+                  {showVacInfo(selected.balanceKey) ? (
+                    <div className="mt-1 text-[12px] text-lll-text-soft space-y-0.5">
+                      <div>
+                        Total acumulado (para el gráfico):{" "}
+                        <span className="text-lll-text font-semibold">
+                          {selected.allowance == null
+                            ? "—"
+                            : `${selected.allowance}${fmtUnit(selected.unit)}`}
+                        </span>
+                      </div>
+                      <div>
+                        Cupo anual (antigüedad):{" "}
+                        <span className="text-lll-text font-semibold">
+                          {vacAnnualEntitlement == null
+                            ? "—"
+                            : `${vacAnnualEntitlement}${fmtUnit(selected.unit)}`}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="mt-1 text-[12px] text-lll-text-soft">
+                      Unidad: {fmtUnit(selected.unit)} · Cupo:{" "}
+                      {selected.allowance == null
+                        ? "—"
+                        : `${selected.allowance}${fmtUnit(selected.unit)}`}
+                    </p>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-3 gap-2 w-full md:w-auto">
@@ -406,13 +567,15 @@ export default function BalancesView({
                   <div className="rounded-xl border border-lll-border bg-lll-bg-softer px-3 py-2">
                     <p className="text-[11px] text-lll-text-soft">Usado</p>
                     <p className="text-lg font-bold">
-                      {selected.used}{fmtUnit(selected.unit)}
+                      {selected.used}
+                      {fmtUnit(selected.unit)}
                     </p>
                   </div>
                   <div className="rounded-xl border border-lll-border bg-lll-bg-softer px-3 py-2">
                     <p className="text-[11px] text-lll-text-soft">Reservado</p>
                     <p className="text-lg font-bold">
-                      {selected.reserved}{fmtUnit(selected.unit)}
+                      {selected.reserved}
+                      {fmtUnit(selected.unit)}
                     </p>
                   </div>
                 </div>
@@ -434,6 +597,7 @@ export default function BalancesView({
             </div>
           )}
 
+          {/* Historial */}
           <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
             <div className="flex items-center justify-between">
               <p className="text-sm font-semibold">Historial</p>
@@ -478,8 +642,14 @@ export default function BalancesView({
             </div>
           </div>
 
+          {!startDateISO ? (
+            <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4 text-[12px] text-lll-text-soft">
+              Nota: este empleado no tiene <code>start_date</code> cargado; la antigüedad no se puede
+              calcular para mostrar el cupo anual.
+            </div>
+          ) : null}
         </div>
       </div>
-    </>
+    </div>
   );
 }

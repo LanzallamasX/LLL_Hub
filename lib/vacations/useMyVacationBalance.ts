@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { fetchMyVacationBalance, type VacationBalance } from "@/lib/supabase/vacations";
 
 export function useMyVacationBalance(enabled = true) {
@@ -8,27 +8,24 @@ export function useMyVacationBalance(enabled = true) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const reload = useCallback(async () => {
     if (!enabled) return;
 
-    let alive = true;
-    (async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const res = await fetchMyVacationBalance();
-        if (!alive) return;
-        setData(res);
-      } catch (e: any) {
-        if (!alive) return;
-        setError(e?.message ?? "Error cargando balance de vacaciones.");
-      } finally {
-        if (alive) setLoading(false);
-      }
-    })();
-
-    return () => { alive = false; };
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await fetchMyVacationBalance();
+      setData(res);
+    } catch (e: any) {
+      setError(e?.message ?? "Error cargando balance de vacaciones.");
+    } finally {
+      setLoading(false);
+    }
   }, [enabled]);
 
-  return { data, loading, error };
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  return { data, loading, error, reload };
 }

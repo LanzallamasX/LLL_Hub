@@ -25,6 +25,10 @@ export type ProfileRow = {
   emergency_contact_name: string | null;
   emergency_contact_phone: string | null;
 
+  // ✅ migración vacaciones
+  vacation_migration_date: string | null; // date (YYYY-MM-DD)
+  vacation_available_at_migration: number; // int >= 0
+
   created_at: string;
   updated_at: string;
 };
@@ -45,9 +49,13 @@ const PROFILES_SELECT = `
   role,
   active,
   annual_vacation_days,
+  vacation_migration_date,
+  vacation_available_at_migration,
   created_at,
   updated_at
-`.replace(/\s+/g, " ").trim();
+`
+  .replace(/\s+/g, " ")
+  .trim();
 
 export async function listProfiles(): Promise<ProfileRow[]> {
   const { data, error } = await supabase
@@ -60,30 +68,62 @@ export async function listProfiles(): Promise<ProfileRow[]> {
   return (data ?? []) as ProfileRow[];
 }
 
-export async function updateProfile(
-  id: string,
-  patch: Partial<
-    Pick<
-      ProfileRow,
-      | "first_name"
-      | "last_name"
-      | "full_name"
-      | "dni"
-      | "job_title"
-      | "team"
-      | "start_date"
-      | "blood_type"
-      | "emergency_contact_name"
-      | "emergency_contact_phone"
-      | "role"
-      | "active"
-      | "annual_vacation_days"
-    >
+export type UpdateProfilePatch = Partial<
+  Pick<
+    ProfileRow,
+    | "first_name"
+    | "last_name"
+    | "full_name"
+    | "dni"
+    | "job_title"
+    | "team"
+    | "start_date"
+    | "blood_type"
+    | "emergency_contact_name"
+    | "emergency_contact_phone"
+    | "role"
+    | "active"
+    | "annual_vacation_days"
+    | "vacation_migration_date"
+    | "vacation_available_at_migration"
   >
-): Promise<ProfileRow> {
+>;
+
+function hasOwn<K extends PropertyKey>(
+  obj: unknown,
+  key: K
+): obj is Record<K, unknown> {
+  return !!obj && typeof obj === "object" && Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+export async function updateProfile(id: string, patch: UpdateProfilePatch): Promise<ProfileRow> {
+  // ✅ Copia y sanitización sin “inventar” campos
+  const safePatch: UpdateProfilePatch = { ...patch };
+
+  // ✅ Normaliza: "" -> null (solo si el campo vino en el patch)
+  if (hasOwn(safePatch, "vacation_migration_date")) {
+    const v = (safePatch.vacation_migration_date ?? "").toString().trim();
+    safePatch.vacation_migration_date = v ? v : null;
+  }
+
+  // ✅ Normaliza número (solo si vino en el patch)
+  if (hasOwn(safePatch, "vacation_available_at_migration")) {
+    const raw = safePatch.vacation_available_at_migration;
+    const n = typeof raw === "number" ? raw : Number(raw);
+    safePatch.vacation_available_at_migration = Number.isFinite(n)
+      ? Math.max(0, Math.trunc(n))
+      : 0;
+  }
+
+  // ✅ Normaliza: "" -> null para start_date si vino
+  if (hasOwn(safePatch, "start_date")) {
+    const v = (safePatch.start_date ?? "").toString().trim();
+    safePatch.start_date = v ? v : null;
+  }
+
   const { data, error } = await supabase
     .from("profiles")
-    .update(patch)
+    .update(safePatch)
     .eq("id", id)
     .select(PROFILES_SELECT)
     .single();

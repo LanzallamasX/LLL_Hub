@@ -288,50 +288,75 @@ export default function OwnerUsersPage() {
     setEditingProfile(null);
   }
 
-  async function saveEdit(id: string, payload: EditProfilePayload) {
-    setError(null);
 
-    try {
-      const start_date = (payload as any).startDate ?? (payload as any).start_date;
+  
+async function saveEdit(id: string, payload: EditProfilePayload) {
+  setError(null);
 
-      const patch = pickDefined({
-        first_name: (payload as any).firstName ?? (payload as any).first_name,
-        last_name: (payload as any).lastName ?? (payload as any).last_name,
-        full_name: (payload as any).fullName ?? (payload as any).full_name,
+  try {
+    const start_date = (payload as any).startDate ?? (payload as any).start_date;
 
-        dni: (payload as any).dni,
-        job_title: (payload as any).jobTitle ?? (payload as any).job_title,
-        team: (payload as any).team,
+    const patch = pickDefined({
+      first_name: (payload as any).firstName ?? (payload as any).first_name,
+      last_name: (payload as any).lastName ?? (payload as any).last_name,
+      full_name: (payload as any).fullName ?? (payload as any).full_name,
 
-        start_date,
+      dni: (payload as any).dni,
+      job_title: (payload as any).jobTitle ?? (payload as any).job_title,
+      team: (payload as any).team,
 
-        blood_type: (payload as any).bloodType ?? (payload as any).blood_type,
-        emergency_contact_name:
-          (payload as any).emergencyContactName ?? (payload as any).emergency_contact_name,
-        emergency_contact_phone:
-          (payload as any).emergencyContactPhone ?? (payload as any).emergency_contact_phone,
+      start_date,
 
-        role: (payload as any).role,
-        active: (payload as any).active,
+      blood_type: (payload as any).bloodType ?? (payload as any).blood_type,
+      emergency_contact_name:
+        (payload as any).emergencyContactName ?? (payload as any).emergency_contact_name,
+      emergency_contact_phone:
+        (payload as any).emergencyContactPhone ?? (payload as any).emergency_contact_phone,
 
-        annual_vacation_days:
-          (payload as any).annualVacationDays ?? (payload as any).annual_vacation_days,
-      });
+      role: (payload as any).role,
+      active: (payload as any).active,
 
-      if (
-        patch.annual_vacation_days == null ||
-        !Number.isFinite(Number(patch.annual_vacation_days))
-      ) {
-        delete (patch as any).annual_vacation_days;
-      }
+      annual_vacation_days:
+        (payload as any).annualVacationDays ?? (payload as any).annual_vacation_days,
 
-      const updated = await updateProfile(id, patch as any);
-      setProfiles((prev) => prev.map((x) => (x.id === id ? updated : x)));
-    } catch (err: any) {
-      setError(err?.message ?? "Error guardando cambios.");
-      throw err;
+      // ✅✅ NUEVO: migración vacaciones (ESTO FALTABA)
+      vacation_migration_date:
+        (payload as any).vacation_migration_date ?? (payload as any).vacationMigrationDate,
+      vacation_available_at_migration:
+        (payload as any).vacation_available_at_migration ?? (payload as any).vacationAvailableAtMigration,
+    });
+
+    // sanity anual days
+    if (patch.annual_vacation_days == null || !Number.isFinite(Number(patch.annual_vacation_days))) {
+      delete (patch as any).annual_vacation_days;
     }
+
+    // sanity migration number
+    if ("vacation_available_at_migration" in patch) {
+      const n = Number((patch as any).vacation_available_at_migration);
+      (patch as any).vacation_available_at_migration = Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0;
+    }
+
+    // "" -> null para date
+    if ("vacation_migration_date" in patch) {
+      const v = String((patch as any).vacation_migration_date ?? "").trim();
+      (patch as any).vacation_migration_date = v ? v : null;
+    }
+
+    const updated = await updateProfile(id, patch as any);
+
+    setProfiles((prev) => prev.map((x) => (x.id === id ? updated : x)));
+
+    // ✅ opcional pero recomendado: si el modal sigue abierto con "editingProfile" viejo, lo actualizás
+    setEditingProfile(updated);
+  } catch (err: any) {
+    setError(err?.message ?? "Error guardando cambios.");
+    throw err;
   }
+}
+
+
+
 
   // ====== Eliminar definitivo ======
   async function handleDeletePerson(row: PersonRow) {

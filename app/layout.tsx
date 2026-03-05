@@ -5,6 +5,8 @@ import "./globals.css";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { AbsencesProvider } from "@/contexts/AbsencesContext";
 
+
+
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -29,6 +31,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <AuthProvider>
+
           <AbsencesProvider>{children}</AbsencesProvider>
         </AuthProvider>
       </body>

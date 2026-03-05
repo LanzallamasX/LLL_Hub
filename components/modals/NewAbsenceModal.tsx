@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { prettySupabaseError } from "@/lib/supabase/errors";
 
 import {
@@ -17,10 +17,11 @@ import {
   type PolicyUnit,
 } from "@/lib/absencePolicies";
 
-import { countChargeableDays } from "@/lib/vacations/dateCount";
 import { DEFAULT_VACATION_SETTINGS } from "@/lib/vacations/settings";
+import { findOverlappingAbsence } from "@/lib/absences/overlap";
 
-import { findOverlappingAbsence, type AbsenceLike } from "@/lib/absences/overlap";
+import DateRangePickerLLL, { type BlockedRange } from "@/components/ui/DateRangePickerLLL";
+import { countChargeableDays } from "@/lib/vacations/dateCount";
 
 export type NewAbsencePayload = {
   from: string;
@@ -35,20 +36,23 @@ export type NewAbsencePayload = {
 type Usage = { used: number; unit: PolicyUnit };
 
 export type VacationInfo = {
-  entitlement: number; // cupo anual (bucket actual)
-  carryover: number;   // acumulado (remanente buckets anteriores vivos)
-  usedThisYear: number;// usado (ventana 3 años / fifo)
-  available: number;   // disponible (ventana 3 años / fifo)
+  // compat: mantenemos nombres, pero ahora:
+  // entitlement = acumulado total
+  // usedThisYear = usado total
+  entitlement: number;
+  carryover: number;
+  usedThisYear: number;
+  available: number;
+
+  accrued: number; // acumulado total (ganado)
+  used: number; // pasado aprobado
+  reserved: number; // futuro/en curso aprobado
+  pending: number; // futuro/en curso pendiente
 };
 
 type Props = {
   open: boolean;
   onClose: () => void;
-
-  /**
-   * onSubmit debería lanzar (throw) si falla.
-   * Ej: si Supabase devuelve error, throw error.
-   */
   onSubmit: (payload: NewAbsencePayload) => void | Promise<void>;
 
   initial?: Partial<NewAbsencePayload>;
@@ -56,21 +60,27 @@ type Props = {
   title?: string;
   subtitle?: string;
 
-  /** Backward compat: si solo pasás available, sigue andando */
   vacationAvailable?: number;
-
-  /** ✅ Recomendado: info completa (cupo/acum/usado/disponible) */
   vacationInfo?: VacationInfo | null;
-
-  /** MVP: usado por balanceKey calculado desde ausencias aprobadas */
   usageByKey?: Map<BalanceKey, Usage>;
 
-  /** ✅ NUEVO: para bloquear solapamientos en UI */
-  existingAbsences?: AbsenceLike[]; // típicamente tus myAbsences mapeadas
-  ignoreAbsenceId?: string;         // cuando editás
+  existingAbsences?: Array<{
+    id: string;
+    status: "pendiente" | "aprobado" | "rechazado";
+    from: string;
+    to: string;
+  }>;
+
+  ignoreAbsenceId?: string | null;
+  holidaysISO?: Set<string>;
+
+  /** ✅ fecha de ingreso ISO YYYY-MM-DD (para antigüedad y otorgado anual) */
+  startDateISO?: string | null;
+
+  /** ✅ fecha simulada para testear políticas (YYYY-MM-DD) */
+  asOfISO?: string | null;
 };
 
-// ✅ Tipamos la lista con el LicenseSubtype REAL (importado)
 const LICENSE_SUBTYPES: readonly LicenseSubtype[] = [
   "TURNO_MEDICO",
   "CUMPLEANIOS_LIBRE",
@@ -85,15 +95,9 @@ const LICENSE_SUBTYPES: readonly LicenseSubtype[] = [
   "FALLECIMIENTO_HERMANO",
 ];
 
-function StatBar({
-  left,
-  right,
-}: {
-  left: React.ReactNode;
-  right?: React.ReactNode;
-}) {
+function StatBar({ left, right }: { left: React.ReactNode; right?: React.ReactNode }) {
   return (
-    <div className="rounded-xl bg-blue-500/90 text-white px-4 py-3 text-[13px] leading-5">
+    <div className="rounded-2xl bg-blue-500/90 text-white px-4 py-3 text-[13px] leading-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">{left}</div>
         {right ? <div className="text-white/90">{right}</div> : null}
@@ -104,6 +108,70 @@ function StatBar({
 
 function Sep() {
   return <span className="mx-1.5 text-white/70">|</span>;
+}
+
+function Pill({
+  children,
+  tone = "neutral",
+}: {
+  children: React.ReactNode;
+  tone?: "neutral" | "danger" | "warn";
+}) {
+  const cls =
+    tone === "danger"
+      ? "border-red-500/30 bg-red-500/10 text-red-200"
+      : tone === "warn"
+      ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
+      : "border-lll-border bg-lll-bg-softer text-lll-text-soft";
+
+  return <div className={`rounded-xl border px-3 py-2 text-[13px] ${cls}`}>{children}</div>;
+}
+
+function fmt2(n: number) {
+  const s = n.toFixed(2);
+  return s.endsWith(".00") ? String(Math.round(n)) : s;
+}
+
+function parseISODate(iso?: string | null) {
+  if (!iso) return null;
+  // iso: YYYY-MM-DD
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d);
+}
+
+function parseAsOfDate(iso?: string | null) {
+  if (!iso) return null;
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  // ✅ forzar local (no UTC) para que no “corran” los días por timezone
+  return new Date(y, m - 1, d);
+}
+
+function diffYM(fromISO?: string | null, to = new Date()) {
+  const from = parseISODate(fromISO);
+  if (!from) return null;
+
+  let years = to.getFullYear() - from.getFullYear();
+  let months = to.getMonth() - from.getMonth();
+
+  if (to.getDate() < from.getDate()) months -= 1;
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+  if (years < 0) return { years: 0, months: 0 };
+
+  return { years, months };
+}
+
+// ✅ “otorgado anual” según antigüedad (ajustalo a tu esquema real si cambia)
+function annualEntitlementByYears(years: number) {
+  // ejemplo típico (modificá si tu org_settings es distinto)
+  if (years >= 20) return 35;
+  if (years >= 10) return 28;
+  if (years >= 5) return 21;
+  return 14;
 }
 
 export default function NewAbsenceModal({
@@ -119,12 +187,13 @@ export default function NewAbsenceModal({
   usageByKey,
   existingAbsences,
   ignoreAbsenceId,
+  holidaysISO,
+  startDateISO,
+  asOfISO,
 }: Props) {
   const [from, setFrom] = useState(initial?.from ?? "");
   const [to, setTo] = useState(initial?.to ?? "");
-  const [type, setType] = useState<AbsenceTypeId>(
-    (initial?.type as AbsenceTypeId) ?? "vacaciones"
-  );
+  const [type, setType] = useState<AbsenceTypeId>((initial?.type as AbsenceTypeId) ?? "vacaciones");
   const [note, setNote] = useState(initial?.note ?? "");
 
   const [subtype, setSubtype] = useState<LicenseSubtype | "">(
@@ -132,12 +201,9 @@ export default function NewAbsenceModal({
   );
 
   const [hours, setHours] = useState<string>(
-    initial?.hours != null && Number.isFinite(Number(initial?.hours))
-      ? String(initial?.hours)
-      : ""
+    initial?.hours != null && Number.isFinite(Number(initial?.hours)) ? String(initial?.hours) : ""
   );
 
-  // ✅ Error visible y estado de envío
   const [submitError, setSubmitError] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -155,6 +221,17 @@ export default function NewAbsenceModal({
 
   const isHourUnit = policy?.unit === "hour";
 
+  const blockedRanges: BlockedRange[] = useMemo(() => {
+    return (existingAbsences ?? [])
+      .filter((a) => a.status === "pendiente" || a.status === "aprobado")
+      .filter((a) => (ignoreAbsenceId ? a.id !== ignoreAbsenceId : true))
+      .map((a) => ({
+        from: new Date(a.from + "T00:00:00"),
+        to: new Date(a.to + "T00:00:00"),
+        status: a.status,
+      }));
+  }, [existingAbsences, ignoreAbsenceId]);
+
   const dateRangeOk = useMemo(() => {
     if (!from) return false;
     if (isHourUnit) return true;
@@ -162,7 +239,6 @@ export default function NewAbsenceModal({
     return to >= from;
   }, [from, to, isHourUnit]);
 
-  // Si es por horas, to = from
   useEffect(() => {
     if (!open) return;
     if (!isHourUnit) return;
@@ -170,12 +246,10 @@ export default function NewAbsenceModal({
     if (to !== from) setTo(from);
   }, [open, isHourUnit, from, to]);
 
-  // ✅ NUEVO: detectar solapamiento (solo para rangos válidos)
   const overlapAbsence = useMemo(() => {
     if (!existingAbsences?.length) return null;
     if (!from) return null;
 
-    // rango efectivo
     const rangeFrom = from;
     const rangeTo = isHourUnit ? from : to;
 
@@ -183,8 +257,8 @@ export default function NewAbsenceModal({
     if (rangeTo < rangeFrom) return null;
 
     return findOverlappingAbsence(existingAbsences, rangeFrom, rangeTo, {
-      ignoreId: ignoreAbsenceId,
-      statuses: ["pendiente", "aprobado"], // ✅ solo estas bloquean
+      ignoreId: ignoreAbsenceId ?? undefined,
+      statuses: ["pendiente", "aprobado"],
     });
   }, [existingAbsences, from, to, isHourUnit, ignoreAbsenceId]);
 
@@ -194,7 +268,6 @@ export default function NewAbsenceModal({
     return `Ese rango se solapa con una ausencia ${estado} (${overlapAbsence.from} → ${overlapAbsence.to}). Elegí otras fechas.`;
   }, [overlapAbsence]);
 
-  // Uso por política (no vacaciones)
   const usage = useMemo(() => {
     if (!policy?.deducts || !policy.deductsFrom) return null;
 
@@ -202,13 +275,7 @@ export default function NewAbsenceModal({
     const allowance = policy.allowance;
     const available = allowance == null ? null : Math.max(0, allowance - used);
 
-    return {
-      balanceKey: policy.deductsFrom,
-      unit: policy.unit,
-      allowance,
-      used,
-      available,
-    };
+    return { balanceKey: policy.deductsFrom, unit: policy.unit, allowance, used, available };
   }, [policy, usageByKey]);
 
   const exceedsPolicyAvailable = useMemo(() => {
@@ -221,8 +288,6 @@ export default function NewAbsenceModal({
     }
 
     if (!from || !to || to < from) return false;
-
-    // Para políticas por días: diferencia calendario
     const s = new Date(from + "T00:00:00");
     const e = new Date(to + "T00:00:00");
     const days = Math.floor((e.getTime() - s.getTime()) / 86400000) + 1;
@@ -233,8 +298,9 @@ export default function NewAbsenceModal({
     if (!dateRangeOk) return 0;
     if (!isVacation) return 0;
     if (!from || !to) return 0;
-    return countChargeableDays(from, to, DEFAULT_VACATION_SETTINGS.countMode);
-  }, [from, to, dateRangeOk, isVacation]);
+
+    return countChargeableDays(from, to, DEFAULT_VACATION_SETTINGS.countMode, holidaysISO);
+  }, [from, to, dateRangeOk, isVacation, holidaysISO]);
 
   const vacationAvail = useMemo(() => {
     if (typeof vacationInfo?.available === "number") return vacationInfo.available;
@@ -260,9 +326,9 @@ export default function NewAbsenceModal({
   }, [isLicense, subtype]);
 
   const canSubmit = useMemo(() => {
-    if (isSubmitting) return false; // ✅ no doble submit
+    if (isSubmitting) return false;
     if (!dateRangeOk) return false;
-    if (overlapAbsence) return false; // ✅ BLOQUEO POR SOLAPAMIENTO
+    if (overlapAbsence) return false;
     if (isVacation && exceedsAvailable) return false;
     if (!licenseSubtypeOk) return false;
     if (!hoursOk) return false;
@@ -279,7 +345,6 @@ export default function NewAbsenceModal({
     exceedsPolicyAvailable,
   ]);
 
-  // Reset al abrir
   useEffect(() => {
     if (!open) return;
 
@@ -287,28 +352,13 @@ export default function NewAbsenceModal({
     setTo(initial?.to ?? "");
     setType((initial?.type as AbsenceTypeId) ?? "vacaciones");
     setNote(initial?.note ?? "");
-
     setSubtype((initial?.subtype as LicenseSubtype | null | undefined) ?? "");
-    setHours(
-      initial?.hours != null && Number.isFinite(Number(initial?.hours))
-        ? String(initial?.hours)
-        : ""
-    );
+    setHours(initial?.hours != null && Number.isFinite(Number(initial?.hours)) ? String(initial?.hours) : "");
 
-    // ✅ limpia error al abrir
     setSubmitError("");
     setIsSubmitting(false);
-  }, [
-    open,
-    initial?.from,
-    initial?.to,
-    initial?.type,
-    initial?.note,
-    initial?.subtype,
-    initial?.hours,
-  ]);
+  }, [open, initial?.from, initial?.to, initial?.type, initial?.note, initial?.subtype, initial?.hours]);
 
-  // ESC
   useEffect(() => {
     if (!open) return;
     function onKeyDown(e: KeyboardEvent) {
@@ -317,6 +367,18 @@ export default function NewAbsenceModal({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, onClose]);
+
+  // ✅ ahora la antigüedad/otorgado se calcula con “asOf” si existe
+  const nowForPolicy = useMemo(() => {
+    return parseAsOfDate(asOfISO) ?? new Date();
+  }, [asOfISO]);
+
+  const tenure = useMemo(() => diffYM(startDateISO ?? null, nowForPolicy), [startDateISO, nowForPolicy]);
+
+  const annualEntitlement = useMemo(() => {
+    if (!tenure) return null;
+    return annualEntitlementByYears(tenure.years);
+  }, [tenure]);
 
   async function handleSubmit() {
     if (!canSubmit) return;
@@ -335,7 +397,7 @@ export default function NewAbsenceModal({
 
     try {
       await onSubmit(payload);
-      onClose(); // ✅ solo cierra si fue OK
+      onClose();
     } catch (err: any) {
       setSubmitError(prettySupabaseError(err));
       setIsSubmitting(false);
@@ -351,7 +413,6 @@ export default function NewAbsenceModal({
       aria-modal="true"
       aria-label={title}
     >
-      {/* Overlay */}
       <button
         type="button"
         className="absolute inset-0 bg-black/60"
@@ -359,19 +420,32 @@ export default function NewAbsenceModal({
         aria-label="Cerrar modal"
       />
 
-      {/* Panel */}
       <div
-        className="relative w-full max-w-lg rounded-2xl border border-lll-border bg-lll-bg-soft"
+        className="relative w-full max-w-4xl rounded-2xl border border-lll-border bg-lll-bg-soft shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="p-4 border-b border-lll-border flex items-center justify-between">
-          <div>
-            <p className="text-sm font-semibold">{title}</p>
-            <p className="text-[12px] text-lll-text-soft">{subtitle}</p>
+        <div className="px-5 py-4 border-b border-lll-border flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-base font-semibold leading-6">{title}</p>
+            <p className="mt-0.5 text-[13px] text-lll-text-soft">{subtitle}</p>
+
+            <div className="mt-3 space-y-2">
+              {submitError ? <Pill tone="danger">{submitError}</Pill> : null}
+              {!submitError && overlapErrorMsg ? <Pill tone="warn">{overlapErrorMsg}</Pill> : null}
+            </div>
+
+            {/* ✅ indicator opcional de simulación */}
+            {asOfISO ? (
+              <div className="mt-2">
+                <Pill tone="warn">
+                  Modo test: simulando fecha <span className="font-semibold">{asOfISO}</span>
+                </Pill>
+              </div>
+            ) : null}
           </div>
 
           <button
-            className="w-9 h-9 rounded-full bg-lll-bg-softer border border-lll-border"
+            className="w-10 h-10 shrink-0 rounded-full bg-lll-bg-softer border border-lll-border text-lll-text"
             onClick={onClose}
             aria-label="Cerrar"
             type="button"
@@ -381,247 +455,283 @@ export default function NewAbsenceModal({
           </button>
         </div>
 
-        <div className="p-4 space-y-3">
-          {/* ✅ Error global */}
-          {submitError ? (
-            <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-[13px] text-red-200">
-              {submitError}
-            </div>
-          ) : null}
+        <div className="p-5">
+          <div className="mb-4">
+            {isVacation ? (
+              vacationInfo ? (
+                <StatBar
+                  left={
+                    <>
+                      {tenure ? (
+                        <>
+                          <span>
+                            Antigüedad: {tenure.years}a {tenure.months}m
+                          </span>
+                        </>
+                      ) : null}
 
-          {/* ✅ Error preventivo de solapamiento */}
-          {!submitError && overlapErrorMsg ? (
-            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-200">
-              {overlapErrorMsg}
-            </div>
-          ) : null}
+                      {annualEntitlement != null ? (
+                        <>
+                          <Sep />
+                          <span>Otorgado anual: {annualEntitlement} d</span>
+                        </>
+                      ) : null}
 
-          {/* Tipo */}
-          <div>
-            <label className="text-[12px] text-lll-text-soft">Tipo</label>
-            <select
-              className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none"
-              value={type}
-              onChange={(e) => {
-                const next = e.target.value as AbsenceTypeId;
-                setType(next);
-                setSubmitError("");
+                      <Sep />
+                      <span className="font-semibold">Saldo : {vacationInfo.available} d</span>
+                      <Sep />
+                      <span>Usado: {fmt2(vacationInfo.used)} d</span>
+                      <Sep />
+                      <span>Reservado: {fmt2(vacationInfo.reserved)} d</span>
+                      <Sep />
+                      <span>Pendiente: {fmt2(vacationInfo.pending)} d</span>
+                    </>
+                  }
+                  right={<span className="text-white/90">Acumulativo · sin vencimiento</span>}
+                />
+              ) : vacationAvail != null ? (
+                <StatBar
+                  left={
+                    <>
+                      <span className="font-semibold">Disponible: {fmt2(vacationAvail)} d</span>
 
-                if (next !== "licencia") {
-                  setSubtype("");
-                  setHours("");
-                }
-              }}
-            >
-              {ABSENCE_TYPES.filter((t) => t.active).map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.label}
-                </option>
-              ))}
-            </select>
+                      {tenure ? (
+                        <>
+                          <Sep />
+                          <span>
+                            Antigüedad: {tenure.years}a {tenure.months}m
+                          </span>
+                        </>
+                      ) : null}
+
+                      {annualEntitlement != null ? (
+                        <>
+                          <Sep />
+                          <span>Otorgado anual: {annualEntitlement} d</span>
+                        </>
+                      ) : null}
+
+                      <Sep />
+                      <span className="text-white/90">Cargando detalle…</span>
+                    </>
+                  }
+                />
+              ) : null
+            ) : null}
+
+            {!isVacation && usage && usage.allowance != null ? (
+              <div className="mt-3">
+                <StatBar
+                  left={
+                    <>
+                      <span className="font-semibold">
+                        Por política: {usage.allowance} {usage.unit === "hour" ? "horas" : "días"}
+                      </span>
+                      <Sep />
+                      <span>
+                        Disponible: {usage.available} {usage.unit === "hour" ? "h" : "d"}
+                      </span>
+                      <Sep />
+                      <span>
+                        Usado: {usage.used} {usage.unit === "hour" ? "h" : "d"}
+                      </span>
+                    </>
+                  }
+                  right={exceedsPolicyAvailable ? <span className="text-white/90">Te pasás del disponible</span> : null}
+                />
+              </div>
+            ) : null}
           </div>
 
-          {/* Subtipo */}
-          {isLicense && (
-            <div>
-              <label className="text-[12px] text-lll-text-soft">Subtipo</label>
-              <select
-                className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none"
-                value={subtype}
-                onChange={(e) => {
-                  setSubtype(e.target.value as any);
-                  setHours("");
-                  setSubmitError("");
-                }}
-              >
-                <option value="">Seleccionar…</option>
-                {LICENSE_SUBTYPES.map((s) => (
-                  <option key={s} value={s}>
-                    {getLicenseSubtypeLabel(s as any)}
-                  </option>
-                ))}
-              </select>
-
-              {!licenseSubtypeOk && (
-                <p className="mt-1 text-[12px] text-red-300">Elegí un subtipo para continuar.</p>
-              )}
-            </div>
-          )}
-
-          {/* ✅ Barra Vacaciones */}
-          {isVacation ? (
-            vacationInfo ? (
-              <StatBar
-                left={
-                  <>
-                    <span className="font-semibold">Cupo: {vacationInfo.entitlement} d</span>
-                    <Sep />
-                    <span>Acum: {vacationInfo.carryover} d</span>
-                    <Sep />
-                    <span>Usado: {vacationInfo.usedThisYear} d</span>
-                    <Sep />
-                    <span className="font-semibold">Disponible: {vacationInfo.available} d</span>
-                  </>
-                }
-                right={<span className="text-white/90">Ventana 3 años · FIFO</span>}
-              />
-            ) : vacationAvail != null ? (
-              <StatBar
-                left={
-                  <>
-                    <span className="font-semibold">Disponible: {vacationAvail} d</span>
-                    <Sep />
-                    <span className="text-white/90">Cargando detalle de cupo/acum…</span>
-                  </>
-                }
-              />
-            ) : null
-          ) : null}
-
-          {/* ✅ Barra Políticas (no vacaciones) */}
-          {!isVacation && usage && usage.allowance != null ? (
-            <StatBar
-              left={
-                <>
-                  <span className="font-semibold">
-                    Por política: {usage.allowance} {usage.unit === "hour" ? "horas" : "días"}
-                  </span>
-                  <Sep />
-                  <span>
-                    Disponible: {usage.available} {usage.unit === "hour" ? "h" : "d"}
-                  </span>
-                  <Sep />
-                  <span>
-                    Usado: {usage.used} {usage.unit === "hour" ? "h" : "d"}
-                  </span>
-                </>
-              }
-              right={exceedsPolicyAvailable ? <span className="text-white/90">Te pasás del disponible</span> : null}
-            />
-          ) : null}
-
-          {/* Fechas / Horas */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label className="text-[12px] text-lll-text-soft">{isHourUnit ? "Fecha" : "Desde"}</label>
-              <input
-                className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none"
-                type="date"
-                value={from}
-                onChange={(e) => {
-                  setFrom(e.target.value);
-                  setSubmitError("");
-                }}
-              />
-            </div>
-
-            {isHourUnit ? (
-              <div>
-                <label className="text-[12px] text-lll-text-soft">Horas</label>
-                <input
-                  className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none"
-                  type="number"
-                  min={0}
-                  step={0.5}
-                  value={hours}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-lll-border bg-lll-bg-softer p-4">
+                <label className="text-[12px] text-lll-text-soft">Tipo</label>
+                <select
+                  className="mt-2 w-full px-3 py-2 rounded-lg bg-lll-bg-soft border border-lll-border outline-none"
+                  value={type}
                   onChange={(e) => {
-                    setHours(e.target.value);
+                    const next = e.target.value as AbsenceTypeId;
+                    setType(next);
                     setSubmitError("");
+
+                    if (next !== "licencia") {
+                      setSubtype("");
+                      setHours("");
+                    }
                   }}
-                  placeholder="Ej: 6"
-                />
-                {!hoursOk ? (
-                  <p className="mt-1 text-[12px] text-red-300">Ingresá horas válidas (mayor a 0).</p>
+                >
+                  {ABSENCE_TYPES.filter((t) => t.active).map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+
+                {isLicense ? (
+                  <div className="mt-4">
+                    <label className="text-[12px] text-lll-text-soft">Subtipo</label>
+                    <select
+                      className="mt-2 w-full px-3 py-2 rounded-lg bg-lll-bg-soft border border-lll-border outline-none"
+                      value={subtype}
+                      onChange={(e) => {
+                        setSubtype(e.target.value as any);
+                        setHours("");
+                        setSubmitError("");
+                      }}
+                    >
+                      <option value="">Seleccionar…</option>
+                      {LICENSE_SUBTYPES.map((s) => (
+                        <option key={s} value={s}>
+                          {getLicenseSubtypeLabel(s as any)}
+                        </option>
+                      ))}
+                    </select>
+
+                    {!licenseSubtypeOk ? (
+                      <p className="mt-2 text-[12px] text-red-300">Elegí un subtipo para continuar.</p>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
-            ) : (
-              <div>
-                <label className="text-[12px] text-lll-text-soft">Hasta</label>
-                <input
-                  className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none"
-                  type="date"
-                  value={to}
+
+              <div className="rounded-2xl border border-lll-border bg-lll-bg-softer p-4">
+                {isHourUnit ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-[12px] text-lll-text-soft">Fecha</label>
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-lg bg-lll-bg-soft border border-lll-border outline-none"
+                        type="date"
+                        value={from}
+                        onChange={(e) => {
+                          setFrom(e.target.value);
+                          setSubmitError("");
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[12px] text-lll-text-soft">Horas</label>
+                      <input
+                        className="mt-2 w-full px-3 py-2 rounded-lg bg-lll-bg-soft border border-lll-border outline-none"
+                        type="number"
+                        min={0}
+                        step={0.5}
+                        value={hours}
+                        onChange={(e) => {
+                          setHours(e.target.value);
+                          setSubmitError("");
+                        }}
+                        placeholder="Ej: 6"
+                      />
+                      {!hoursOk ? (
+                        <p className="mt-2 text-[12px] text-red-300">Ingresá horas válidas (mayor a 0).</p>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="mt-2">
+                      <DateRangePickerLLL
+                        holidaysISO={holidaysISO}
+                        blockedRanges={blockedRanges}
+                        value={{
+                          from: from ? new Date(from + "T00:00:00") : undefined,
+                          to: to ? new Date(to + "T00:00:00") : undefined,
+                        }}
+                        onChange={(next) => {
+                          const f = next.from ? next.from.toISOString().slice(0, 10) : "";
+                          const t = next.to ? next.to.toISOString().slice(0, 10) : "";
+                          setFrom(f);
+                          setTo(t);
+                          setSubmitError("");
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-lll-border bg-lll-bg-softer p-4">
+                <label className="text-[12px] text-lll-text-soft">Comentario</label>
+                <textarea
+                  className="mt-2 w-full px-3 py-2 rounded-lg bg-lll-bg-soft border border-lll-border outline-none min-h-[220px] resize-none"
+                  placeholder="Opcional..."
+                  value={note}
                   onChange={(e) => {
-                    setTo(e.target.value);
+                    setNote(e.target.value);
                     setSubmitError("");
                   }}
                 />
-              </div>
-            )}
-          </div>
-
-          {/* Info dinámica (vacaciones) */}
-          {isVacation && dateRangeOk ? (
-            <div className="rounded-xl border border-lll-border bg-lll-bg-softer p-3 text-sm">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-lll-text-soft">Solicitado</span>
-                <span className="font-semibold">{requestedDays} día(s)</span>
+                <p className="mt-2 text-[12px] text-lll-text-soft">Tip: agregá contexto si necesitás aprobación rápida.</p>
               </div>
 
-              {vacationAvail != null ? (
-                <div className="mt-1 flex items-center justify-between gap-3">
-                  <span className="text-lll-text-soft">Disponible</span>
-                  <span className="font-semibold">{vacationAvail}</span>
+              <div className="rounded-2xl border border-lll-border bg-lll-bg-softer p-4 flex items-center justify-between gap-3">
+                <div className="text-[12px] text-lll-text-soft">
+                  {typeDef && typeDef.requiresApproval === false ? "Este tipo no requiere aprobación." : " "}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={onClose}
+                    className="px-4 py-2 rounded-lg border border-lll-border bg-lll-bg-soft text-lll-text"
+                    type="button"
+                    disabled={isSubmitting}
+                  >
+                    Cancelar
+                  </button>
+
+                  <button
+                    onClick={handleSubmit}
+                    disabled={!canSubmit}
+                    className={`px-4 py-2 rounded-lg font-semibold ${
+                      canSubmit
+                        ? "bg-lll-accent text-black"
+                        : "bg-lll-bg-soft text-lll-text-soft border border-lll-border cursor-not-allowed"
+                    }`}
+                    type="button"
+                  >
+                    {isSubmitting ? "Enviando..." : submitLabel}
+                  </button>
+                </div>
+              </div>
+
+              {isVacation && dateRangeOk ? (
+                <div className="rounded-xl border border-lll-border bg-lll-bg-soft p-3 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-lll-text-soft">Solicitado</span>
+                    <span className="font-semibold">{fmt2(requestedDays)} día(s)</span>
+                  </div>
+
+                  {vacationAvail != null ? (
+                    <div className="mt-1 flex items-center justify-between gap-3">
+                      <span className="text-lll-text-soft">Disponible después</span>
+                      <span className="font-semibold">{fmt2(Math.max(0, vacationAvail - requestedDays))}</span>
+                    </div>
+                  ) : null}
+
+                  {exceedsAvailable ? (
+                    <p className="mt-2 text-[12px] text-red-300">
+                      Te faltan {fmt2(requestedDays - (vacationAvail ?? 0))} día(s) para cubrir esta solicitud.
+                    </p>
+                  ) : null}
+
+                  <p className="mt-2 text-[12px] text-lll-text-soft">
+                    Conteo:{" "}
+                    {DEFAULT_VACATION_SETTINGS.countMode === "business_days"
+                      ? "Lun–Vie (no descuenta sáb/dom ni feriados)"
+                      : "Calendario (incluye sáb/dom y feriados)"}
+                  </p>
                 </div>
               ) : null}
-
-              {exceedsAvailable ? (
-                <p className="mt-2 text-[12px] text-red-300">
-                  Te faltan {requestedDays - (vacationAvail ?? 0)} día(s) para cubrir esta solicitud.
-                </p>
-              ) : null}
-
-              <p className="mt-2 text-[12px] text-lll-text-soft">
-                Conteo:{" "}
-                {DEFAULT_VACATION_SETTINGS.countMode === "business_days"
-                  ? "Lun–Vie (no descuenta sáb/dom)"
-                  : "Calendario (incluye sáb/dom)"}
-              </p>
             </div>
-          ) : null}
-
-          {/* Comentario */}
-          <div>
-            <label className="text-[12px] text-lll-text-soft">Comentario</label>
-            <textarea
-              className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none min-h-[90px]"
-              placeholder="Opcional..."
-              value={note}
-              onChange={(e) => {
-                setNote(e.target.value);
-                setSubmitError("");
-              }}
-            />
           </div>
-
-          <div className="pt-2 flex justify-end gap-2">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-lll-text"
-              type="button"
-              disabled={isSubmitting}
-            >
-              Cancelar
-            </button>
-
-            <button
-              onClick={handleSubmit}
-              disabled={!canSubmit}
-              className={`px-4 py-2 rounded-lg font-semibold ${
-                canSubmit
-                  ? "bg-lll-accent text-black"
-                  : "bg-lll-bg-softer text-lll-text-soft border border-lll-border cursor-not-allowed"
-              }`}
-              type="button"
-            >
-              {isSubmitting ? "Enviando..." : submitLabel}
-            </button>
-          </div>
-
-          {typeDef && typeDef.requiresApproval === false ? (
-            <p className="text-[12px] text-lll-text-soft">Este tipo no requiere aprobación.</p>
-          ) : null}
         </div>
+
+        <div className="h-4" />
       </div>
     </div>
   );

@@ -14,22 +14,17 @@ function notifIcon(type: string) {
   return "🔔";
 }
 
-function routeForNotification(n: {
-  type: string;
-  entity_type: string | null;
-  entity_id: string | null;
-}) {
+function routeForNotification(n: { type: string; entity_type: string | null; entity_id: string | null }) {
   if (n.entity_type === "absence" && n.entity_id) {
     if (n.type === "absence_created") return `/owner/dashboard?focus=${n.entity_id}`;
-    if (n.type === "absence_approved" || n.type === "absence_rejected")
-      return `/dashboard?focus=${n.entity_id}`;
+    if (n.type === "absence_approved" || n.type === "absence_rejected") return `/dashboard?focus=${n.entity_id}`;
   }
   return "/notifications";
 }
 
 export default function HeaderNotifications({ enabled = true }: { enabled?: boolean }) {
   const router = useRouter();
-  const { items, unreadCount, loading, error, markRead, refresh } = useNotifications({
+  const { items, unreadCount, loading, error, markRead, markAllRead } = useNotifications({
     enabled,
     pollMs: 30000,
     limit: 8,
@@ -38,7 +33,6 @@ export default function HeaderNotifications({ enabled = true }: { enabled?: bool
   const [open, setOpen] = useState(false);
   const panelRef = useRef<HTMLDivElement | null>(null);
 
-  // close on click outside + escape
   useEffect(() => {
     if (!open) return;
 
@@ -66,25 +60,13 @@ export default function HeaderNotifications({ enabled = true }: { enabled?: bool
     return "Notificaciones";
   }, [loading, error]);
 
-  async function toggle() {
-    const next = !open;
-    setOpen(next);
-
-    // MVP: al abrir marcamos todas las unread como leídas
-    if (next) {
-      const fresh = await refresh(); // 👈 ahora refresh devuelve lista (ver hook abajo)
-      const idsToMark = (fresh ?? [])
-        .filter((it) => !it.readAt)
-        .map((it) => it.notificationId);
-
-      if (idsToMark.length) await markRead(idsToMark);
-    }
-  }
+async function toggle() {
+  setOpen((v) => !v);
+}
 
   async function onClickItem(it: any) {
     const n = it.notification;
 
-    // marcar esa sola si estaba unread (más “real” que marcar todo)
     if (!it.readAt) {
       await markRead([it.notificationId]);
     }
@@ -130,6 +112,15 @@ export default function HeaderNotifications({ enabled = true }: { enabled?: bool
             >
               Ver todas
             </button>
+            <button
+  type="button"
+  onClick={async () => {
+    await markAllRead();
+  }}
+  className="text-[12px] px-2 py-1 rounded-lg bg-lll-bg-softer border border-lll-border text-lll-text-soft hover:text-lll-text"
+>
+  Marcar como leídas
+</button>
           </div>
 
           <div className="max-h-[420px] overflow-auto">

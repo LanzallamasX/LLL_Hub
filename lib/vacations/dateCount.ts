@@ -5,7 +5,22 @@ function toDate00(iso: string) {
   return new Date(`${iso}T00:00:00`);
 }
 
-export function countChargeableDays(fromISO: string, toISO: string, mode: CountMode) {
+function toISODate(d: Date) {
+  // YYYY-MM-DD en UTC; como usamos T00:00:00 al crear, para Argentina no debería moverse de día
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Cuenta días “cobrables” para deducción:
+ * - calendar_days: cuenta todos (incluye sáb/dom y feriados)
+ * - business_days: excluye sáb/dom + feriados (si se proveen)
+ */
+export function countChargeableDays(
+  fromISO: string,
+  toISO: string,
+  mode: CountMode,
+  holidaysISO?: Set<string> // 👈 NUEVO
+) {
   const from = toDate00(fromISO);
   const to = toDate00(toISO);
   if (to < from) return 0;
@@ -17,8 +32,15 @@ export function countChargeableDays(fromISO: string, toISO: string, mode: CountM
     const day = d.getDay(); // 0 dom, 6 sab
     const isWeekend = day === 0 || day === 6;
 
-    if (mode === "calendar_days") days++;
-    else if (!isWeekend) days++;
+    if (mode === "calendar_days") {
+      days++;
+    } else {
+      const iso = toISODate(d);
+      const isHoliday = holidaysISO ? holidaysISO.has(iso) : false;
+
+      // business_days => no cuenta fines de semana ni feriados
+      if (!isWeekend && !isHoliday) days++;
+    }
 
     d.setDate(d.getDate() + 1);
   }

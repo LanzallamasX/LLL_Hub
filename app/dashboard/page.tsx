@@ -22,13 +22,22 @@ import { DEFAULT_VACATION_SETTINGS } from "@/lib/vacations/settings";
 import { computeUsageByBalanceKey } from "@/lib/balances/usage";
 
 import { useMyVacationBalance } from "@/lib/vacations/useMyVacationBalance";
-import { toVacationInfoForModalFromBuckets } from "@/lib/vacations/adapters";
+//import { toVacationInfoForModalAccumulated } from "@/lib/vacations/adapters";
+import { toVacationInfoForModal } from "@/lib/vacations/adapters";
+import { useHolidays } from "@/lib/holidays/useHolidays";
+
+import { supabase } from "@/lib/supabase/client";
+
+
 
 export default function DashboardPage() {
   const router = useRouter();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editing, setEditing] = useState<Absence | null>(null);
+
+  const year = new Date().getFullYear();
+const { isoSet: holidaysISO } = useHolidays(year);
 
   const {
     absences,
@@ -51,7 +60,11 @@ export default function DashboardPage() {
   const hasLoadedRef = useRef(false);
 
   // ✅ DB balance (ventana 3 años / FIFO)
-  const { data: vacDb, loading: vacDbLoading } = useMyVacationBalance(isAuthed && !!userId);
+ // const { data: vacDb, loading: vacDbLoading } = useMyVacationBalance(isAuthed && !!userId);
+  
+  const { data: vacDb, loading: vacDbLoading, reload: reloadVacationBalance, } = useMyVacationBalance(isAuthed && !!userId);
+
+
 
   // ✅ cargar ausencias
   useEffect(() => {
@@ -92,6 +105,8 @@ export default function DashboardPage() {
     });
   }, [myAbsences, startDate]);
 
+  // se puede borrar
+
   const myPendingCount = useMemo(
     () => myAbsences.filter((a) => a.status === "pendiente").length,
     [myAbsences]
@@ -113,9 +128,46 @@ export default function DashboardPage() {
   }, [myAbsences]);
 
   // ✅ Modal: Cupo (bucket actual) + Acum (remaining buckets previos) + Usado/Disponible (ventana)
-  const vacationInfoForModal = useMemo(() => {
-    return toVacationInfoForModalFromBuckets(vacDb);
-  }, [vacDb]);
+const vacationInfoForModal = useMemo(() => {
+  return toVacationInfoForModal(vacDb);
+}, [vacDb]);
+
+// obtener fecha desde el profile (start_date) para usarla en el modal 
+const [startDateISO, setStartDateISO] = useState<string | null>(null);
+  const [startDateLoading, setStartDateLoading] = useState(false);
+
+  useEffect(() => {
+    if (!isAuthed || !userId) return;
+
+    let alive = true;
+    (async () => {
+      try {
+        setStartDateLoading(true);
+
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("start_date")
+          .eq("id", userId)
+          .maybeSingle();
+
+        if (!alive) return;
+        if (error) throw error;
+
+        // start_date debería venir como "YYYY-MM-DD"
+        setStartDateISO(data?.start_date ?? null);
+      } catch {
+        if (!alive) return;
+        setStartDateISO(null);
+      } finally {
+        if (alive) setStartDateLoading(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [isAuthed, userId]);
+
 
   // Gates
   if (isLoading) {
@@ -182,7 +234,9 @@ export default function DashboardPage() {
         subtype: payload.subtype ?? null,
         hours: payload.hours ?? null,
       });
+      
 
+      await reloadVacationBalance(); 
       closeModal();
       return;
     }
@@ -198,6 +252,7 @@ export default function DashboardPage() {
       hours: payload.hours ?? null,
     });
 
+    await reloadVacationBalance(); 
     closeModal();
   }
 
@@ -296,7 +351,11 @@ export default function DashboardPage() {
     from: a.from,
     to: a.to,
   }))}
-  ignoreAbsenceId={editing?.id}
+    ignoreAbsenceId={editing?.id ?? null}
+  holidaysISO={holidaysISO}
+      startDateISO={startDateISO}
+
+
 />
     </UserLayout>
   );

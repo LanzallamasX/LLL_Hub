@@ -14,8 +14,7 @@ import { computeBalanceStatsByKey, buildHistoryRows } from "@/lib/balances/stats
 import { POLICIES, type BalanceKey, type PolicyUnit } from "@/lib/absencePolicies";
 import { getAbsenceTypeLabel } from "@/lib/absenceTypes";
 
-import { computeVacationBalance } from "@/lib/vacations/calc";
-import { DEFAULT_VACATION_SETTINGS } from "@/lib/vacations/settings";
+import { supabase } from "@/lib/supabase/client";
 
 function monthLabel(year: number, month0: number) {
   const d = new Date(year, month0, 1);
@@ -47,6 +46,19 @@ function fmtUnit(unit: PolicyUnit) {
   return unit === "hour" ? "h" : "d";
 }
 
+function endOfMonth(year: number, month0: number) {
+  // último día del mes
+  return new Date(year, month0 + 1, 0);
+}
+
+function toISODate(d: Date) {
+  // YYYY-MM-DD
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 type StatRow = {
   balanceKey: BalanceKey;
   label: string;
@@ -59,7 +71,7 @@ type StatRow = {
 
 export default function BalancesPage() {
   const router = useRouter();
-  const { userId, isAuthed, isLoading, startDate } = useAuth();
+  const { userId, isAuthed, isLoading } = useAuth();
   const { absences, loadMyAbsences } = useAbsences();
 
   const didLoad = useRef(false);
@@ -90,52 +102,83 @@ export default function BalancesPage() {
     return absences.filter((a) => a.userId === userId);
   }, [absences, userId]);
 
-  const vacationBalance = useMemo(() => {
-    if (!startDate) return null;
+  // ✅ vacAt desde URL (para testear): /balances?vacAt=YYYY-MM-DD
+  const vacAtFromUrl = useMemo(() => {
+    if (typeof window === "undefined") return null;
+    const sp = new URLSearchParams(window.location.search);
+    const v = (sp.get("vacAt") ?? "").trim();
+    return v || null;
+  }, []);
 
-    return computeVacationBalance({
-      absences: myAbsences,
-      currentYear: year,
-      startDateISO: startDate,
-      settings: DEFAULT_VACATION_SETTINGS,
-    });
-  }, [myAbsences, year, startDate]);
+  // ✅ fecha de evaluación de vacaciones según el período elegido
+  const periodAtISO = useMemo(() => {
+    if (vacAtFromUrl) return vacAtFromUrl;
+    if (month0 === "all") return `${year}-12-31`;
+    return toISODate(endOfMonth(year, month0));
+  }, [vacAtFromUrl, year, month0]);
+
+  // ✅ balance vacaciones REAL (RPC) para que respete migración + acumulado
+  const [vacRpc, setVacRpc] = useState<{
+    granted: number;
+    used: number;
+    reserved: number;
+    available: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!isAuthed || !userId) return;
+
+    (async () => {
+      try {
+        const { data, error } = await supabase.rpc("get_my_vacation_balance_at", {
+          p_at: periodAtISO,
+        });
+
+        if (error) throw error;
+
+        setVacRpc({
+          granted: Number(data?.granted ?? 0),
+          used: Number(data?.used ?? 0),
+          reserved: Number(data?.reserved ?? 0),
+          available: Number(data?.available ?? 0),
+        });
+      } catch (e) {
+        console.error("VAC RPC error", e);
+        setVacRpc(null);
+      }
+    })();
+  }, [isAuthed, userId, periodAtISO]);
 
   const statsMap = useMemo(() => {
-    const map = computeBalanceStatsByKey(
-      myAbsences,
-      year,
-      month0 === "all" ? undefined : month0
-    );
+    const map = computeBalanceStatsByKey(myAbsences, year, month0 === "all" ? undefined : month0);
 
-    if (vacationBalance) {
+    // ✅ reemplaza cálculo local por RPC (migración + acumulado)
+    if (vacRpc) {
       map.set("VACATION_DAYS", {
         balanceKey: "VACATION_DAYS",
         unit: "day",
-        allowance: vacationBalance.entitlement + vacationBalance.carryover,
-        used: vacationBalance.usedThisYear,
-        reserved: vacationBalance.reservedThisYear ?? 0,
-        available: vacationBalance.available,
+        allowance: vacRpc.granted,
+        used: vacRpc.used,
+        reserved: vacRpc.reserved,
+        available: vacRpc.available,
       });
     }
 
     return map;
-  }, [myAbsences, year, month0, vacationBalance]);
+  }, [myAbsences, year, month0, vacRpc]);
 
   const breakdownCatalog = useMemo(() => {
-    const rows = POLICIES
-      .filter((p) => p.deducts && p.deductsFrom)
-      .map((p) => ({
-        balanceKey: p.deductsFrom as BalanceKey,
-        unit: p.unit as PolicyUnit,
-        allowance: p.allowance ?? null,
-        label:
-          p.type === "licencia"
-            ? getAbsenceTypeLabel("licencia", p.subtype ?? null)
-            : getAbsenceTypeLabel(p.type as any),
-      }));
+    const rows = POLICIES.filter((p) => p.deducts && p.deductsFrom).map((p) => ({
+      balanceKey: p.deductsFrom as BalanceKey,
+      unit: p.unit as PolicyUnit,
+      allowance: p.allowance ?? null,
+      label:
+        p.type === "licencia"
+          ? getAbsenceTypeLabel("licencia", p.subtype ?? null)
+          : getAbsenceTypeLabel(p.type as any),
+    }));
 
-    const byKey = new Map<BalanceKey, typeof rows[number]>();
+    const byKey = new Map<BalanceKey, (typeof rows)[number]>();
     for (const r of rows) if (!byKey.has(r.balanceKey)) byKey.set(r.balanceKey, r);
     return Array.from(byKey.values());
   }, []);
@@ -284,6 +327,8 @@ export default function BalancesPage() {
 
             <p className="md:ml-2 text-[12px] text-lll-text-soft">
               Período: <span className="text-lll-text">{rangeLabel}</span>
+              <span className="mx-2">·</span>
+              VacAt: <span className="text-lll-text">{periodAtISO}</span>
             </p>
           </div>
 
@@ -316,9 +361,7 @@ export default function BalancesPage() {
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold">Políticas</p>
-                  <p className="text-[12px] text-lll-text-soft truncate">
-                    Tocá una para ver el detalle
-                  </p>
+                  <p className="text-[12px] text-lll-text-soft truncate">Tocá una para ver el detalle</p>
                 </div>
 
                 <label className="flex items-center gap-2 text-[12px] text-lll-text-soft shrink-0">
@@ -444,13 +487,15 @@ export default function BalancesPage() {
                   <div className="rounded-xl border border-lll-border bg-lll-bg-softer px-3 py-2">
                     <p className="text-[11px] text-lll-text-soft">Usado</p>
                     <p className="text-lg font-bold">
-                      {selected.used}{fmtUnit(selected.unit)}
+                      {selected.used}
+                      {fmtUnit(selected.unit)}
                     </p>
                   </div>
                   <div className="rounded-xl border border-lll-border bg-lll-bg-softer px-3 py-2">
                     <p className="text-[11px] text-lll-text-soft">Reservado</p>
                     <p className="text-lg font-bold">
-                      {selected.reserved}{fmtUnit(selected.unit)}
+                      {selected.reserved}
+                      {fmtUnit(selected.unit)}
                     </p>
                   </div>
                 </div>

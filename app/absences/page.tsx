@@ -1,8 +1,8 @@
 // app/absences/page.tsx
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import UserLayout from "@/components/layout/UserLayout";
 import AbsenceList from "@/components/dashboard/AbsenceList";
@@ -16,16 +16,30 @@ import type { Absence } from "@/lib/supabase/absences";
 // para mostrar ausencias usadas
 import { computeUsageByBalanceKey } from "@/lib/balances/usage";
 
-// ✅ balance vacaciones desde DB (ventana 3 años / buckets)
+// ✅ balance vacaciones desde DB
 import { fetchMyVacationBalance, type VacationBalance } from "@/lib/supabase/vacations";
 
 // ✅ adapter shared con Dashboard (evita duplicar lógica)
-import { toVacationInfoForModalFromBuckets } from "@/lib/vacations/adapters";
+import { toVacationInfoForModal } from "@/lib/vacations/adapters";
+
+import { useHolidays } from "@/lib/holidays/useHolidays";
+import { supabase } from "@/lib/supabase/client";
 
 type Filter = "todas" | "pendiente" | "aprobado" | "rechazado";
 
+function isValidDate(v: string | null): v is string {
+  return !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
+}
+
+function yearFromISO(iso?: string | null) {
+  if (!iso) return new Date().getFullYear();
+  const y = Number(iso.slice(0, 4));
+  return Number.isFinite(y) ? y : new Date().getFullYear();
+}
+
 export default function MyAbsencesPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const { userId, email, fullName, isAuthed, isLoading } = useAuth();
   const {
@@ -43,6 +57,14 @@ export default function MyAbsencesPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editing, setEditing] = useState<Absence | null>(null);
 
+  // ✅ Param global para testear políticas (YYYY-MM-DD)
+  const asOfParam = searchParams.get("asOf");
+  const asOfISO = isValidDate(asOfParam) ? asOfParam : null;
+
+  // ✅ Año “simulado” para feriados y cálculos por año
+  const year = useMemo(() => yearFromISO(asOfISO), [asOfISO]);
+  const { isoSet: holidaysISO } = useHolidays(year);
+
   // Evita doble load en dev (StrictMode)
   const didLoad = useRef(false);
 
@@ -50,44 +72,9 @@ export default function MyAbsencesPage() {
   const [vacDb, setVacDb] = useState<VacationBalance | null>(null);
   const [vacDbLoading, setVacDbLoading] = useState(false);
 
-  // 1) Gate + load absences
-  useEffect(() => {
-    if (isLoading) return;
-
-    if (!isAuthed || !userId) {
-      router.replace("/login");
-      return;
-    }
-
-    if (!didLoad.current) {
-      didLoad.current = true;
-      loadMyAbsences(userId);
-    }
-  }, [isLoading, isAuthed, userId, router, loadMyAbsences]);
-
-  // 2) Traer balance vacaciones (para barrita del modal)
-  useEffect(() => {
-    if (!isAuthed || !userId) return;
-
-    let alive = true;
-    (async () => {
-      try {
-        setVacDbLoading(true);
-        const b = await fetchMyVacationBalance();
-        if (!alive) return;
-        setVacDb(b);
-      } catch {
-        if (!alive) return;
-        setVacDb(null);
-      } finally {
-        if (alive) setVacDbLoading(false);
-      }
-    })();
-
-    return () => {
-      alive = false;
-    };
-  }, [isAuthed, userId]);
+  // ✅ Start date desde profile
+  const [startDateISO, setStartDateISO] = useState<string | null>(null);
+  const [startDateLoading, setStartDateLoading] = useState(false);
 
   const currentUser = useMemo(
     () => ({
@@ -119,16 +106,81 @@ export default function MyAbsencesPage() {
     return [...items].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [myAbsences, filter, query]);
 
-  // para ausencias usadas
+  // ✅ ausencias usadas (si tu helper usa “año”, lo hacemos con el año simulado)
   const usageByKey = useMemo(() => {
-    const y = new Date().getFullYear();
-    return computeUsageByBalanceKey(myAbsences, y);
-  }, [myAbsences]);
+    return computeUsageByBalanceKey(myAbsences, year);
+  }, [myAbsences, year]);
 
   // ✅ MISMO criterio que Dashboard, sin duplicación
   const vacationInfoForModal = useMemo(() => {
-    return toVacationInfoForModalFromBuckets(vacDb);
+    return toVacationInfoForModal(vacDb);
   }, [vacDb]);
+
+  // ---------------------------------------------
+  // ✅ Refresh centralizado (se re-ejecuta al cambiar asOfISO)
+  // ---------------------------------------------
+  const refreshAll = useCallback(
+    async (opts?: { forceAbsences?: boolean }) => {
+      if (!isAuthed || !userId) return;
+
+      // 1) Ausencias
+      if (opts?.forceAbsences) {
+        await loadMyAbsences(userId);
+      } else {
+        if (!didLoad.current) {
+          didLoad.current = true;
+          await loadMyAbsences(userId);
+        }
+      }
+
+      // 2) start_date (profile)
+      setStartDateLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("start_date")
+          .eq("id", userId)
+          .maybeSingle();
+
+        if (error) throw error;
+        setStartDateISO(data?.start_date ?? null);
+      } catch {
+        setStartDateISO(null);
+      } finally {
+        setStartDateLoading(false);
+      }
+
+      // 3) Balance vacaciones (según asOfISO)
+      setVacDbLoading(true);
+      try {
+        const b = await fetchMyVacationBalance(asOfISO ?? undefined);
+        setVacDb(b);
+      } catch {
+        setVacDb(null);
+      } finally {
+        setVacDbLoading(false);
+      }
+    },
+    [isAuthed, userId, loadMyAbsences, asOfISO]
+  );
+
+  // Gate de auth + redirect
+  useEffect(() => {
+    if (isLoading) return;
+
+    if (!isAuthed || !userId) {
+      router.replace("/login");
+      return;
+    }
+  }, [isLoading, isAuthed, userId, router]);
+
+  // ✅ Cargar/refresh cuando entra o cambia asOfISO
+  useEffect(() => {
+    if (isLoading) return;
+    if (!isAuthed || !userId) return;
+
+    refreshAll({ forceAbsences: true });
+  }, [isLoading, isAuthed, userId, asOfISO, refreshAll]);
 
   function openCreate() {
     setEditing(null);
@@ -161,6 +213,7 @@ export default function MyAbsencesPage() {
         hours: payload.hours ?? null,
       });
 
+      await refreshAll({ forceAbsences: true });
       closeModal();
       return;
     }
@@ -176,6 +229,7 @@ export default function MyAbsencesPage() {
       hours: payload.hours ?? null,
     });
 
+    await refreshAll({ forceAbsences: true });
     closeModal();
   }
 
@@ -218,6 +272,16 @@ export default function MyAbsencesPage() {
           {absLoading && <p className="mt-1 text-[12px] text-lll-text-soft">Cargando…</p>}
           {absError && <p className="mt-1 text-[12px] text-red-300">{absError}</p>}
           {vacDbLoading && <p className="mt-1 text-[12px] text-lll-text-soft">Cargando vacaciones…</p>}
+          {startDateLoading && (
+            <p className="mt-1 text-[12px] text-lll-text-soft">Cargando fecha de ingreso…</p>
+          )}
+
+          {/* opcional: indicador en la page */}
+          {asOfISO ? (
+            <p className="mt-1 text-[12px] text-amber-300">
+              Modo test activo: simulando fecha {asOfISO}
+            </p>
+          ) : null}
         </div>
 
         <button
@@ -270,25 +334,28 @@ export default function MyAbsencesPage() {
         )}
       </div>
 
-<NewAbsenceModal
-  open={isModalOpen}
-  onClose={closeModal}
-  onSubmit={handleSubmit}
-  initial={editing ? { /* ... */ } : undefined}
-  submitLabel={editing ? "Guardar cambios" : "Enviar"}
-  title={editing ? "Editar solicitud" : "Nueva solicitud"}
-  subtitle={editing ? "Podés editar mientras esté pendiente." : "Completá los datos y enviá la solicitud."}
-  usageByKey={usageByKey}
-  vacationInfo={vacationInfoForModal ?? undefined}
-  vacationAvailable={vacationInfoForModal?.available ?? undefined}
-  existingAbsences={myAbsences.map((a) => ({
-    id: a.id,
-    status: a.status,
-    from: a.from,
-    to: a.to,
-  }))}
-  ignoreAbsenceId={editing?.id}
-/>
+      <NewAbsenceModal
+        open={isModalOpen}
+        onClose={closeModal}
+        onSubmit={handleSubmit}
+        initial={editing ? { /* ... */ } : undefined}
+        submitLabel={editing ? "Guardar cambios" : "Enviar"}
+        title={editing ? "Editar solicitud" : "Nueva solicitud"}
+        subtitle={editing ? "Podés editar mientras esté pendiente." : "Completá los datos y enviá la solicitud."}
+        usageByKey={usageByKey}
+        vacationInfo={vacationInfoForModal ?? undefined}
+        vacationAvailable={vacationInfoForModal?.available ?? undefined}
+        existingAbsences={myAbsences.map((a) => ({
+          id: a.id,
+          status: a.status,
+          from: a.from,
+          to: a.to,
+        }))}
+        ignoreAbsenceId={editing?.id ?? null}
+        holidaysISO={holidaysISO}
+        startDateISO={startDateISO}
+        asOfISO={asOfISO} // ✅ ahora existe
+      />
     </UserLayout>
   );
 }

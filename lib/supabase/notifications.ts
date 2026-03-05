@@ -29,18 +29,24 @@ export async function listMyNotifications(params?: {
 }): Promise<NotificationInboxItem[]> {
   const limit = params?.limit ?? 10;
 
-let q = supabase
-  .from("notification_recipients")
-  .select(`
-    notification_id,
-    read_at,
-    notification:notifications(
-      id,type,title,body,actor_id,entity_type,entity_id,created_at
+  let q = supabase
+    .from("my_inbox")
+    .select(
+      `
+      user_id,
+      notification_id,
+      read_at,
+      type,
+      title,
+      body,
+      actor_id,
+      entity_type,
+      entity_id,
+      created_at
+    `
     )
-  `)
-  // 👇 ordena por la tabla joineada (alias "notification")
-  .order("created_at", { foreignTable: "notification", ascending: false })
-  .limit(limit);
+    .order("created_at", { ascending: false })
+    .limit(limit);
 
   if (params?.onlyUnread) {
     q = q.is("read_at", null);
@@ -49,17 +55,26 @@ let q = supabase
   const { data, error } = await q;
   if (error) throw error;
 
-  return (data ?? [])
-    .filter((r: any) => r.notification?.id)
-    .map((r: any) => ({
-      notificationId: r.notification_id,
-      readAt: r.read_at,
-      createdAt: r.notification.created_at,
-      notification: r.notification,
-    }))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt)); // 👈 NEW → OLD
-
+  return (data ?? []).map((r: any) => ({
+    notificationId: r.notification_id,
+    readAt: r.read_at,
+    createdAt: r.created_at,
+    notification: {
+      id: r.notification_id,
+      type: r.type,
+      title: r.title,
+      body: r.body,
+      actor_id: r.actor_id,
+      entity_type: r.entity_type,
+      entity_id: r.entity_id,
+      created_at: r.created_at,
+    },
+  }));
 }
+
+
+
+
 
 export async function countMyUnreadNotifications(): Promise<number> {
   const { count, error } = await supabase
@@ -71,23 +86,33 @@ export async function countMyUnreadNotifications(): Promise<number> {
   return count ?? 0;
 }
 
-export async function markNotificationsRead(notificationIds: string[]) {
-  if (notificationIds.length === 0) return;
-
-  const { error } = await supabase
-    .from("notification_recipients")
-    .update({ read_at: new Date().toISOString() })
-    .in("notification_id", notificationIds)
-    .is("read_at", null);
-
+/**
+ * ✅ SINGLE (RPC): marca UNA notificación como leída para el usuario actual.
+ * Requiere SQL:
+ *   public.mark_notification_read(p_notification_id uuid)
+ */
+export async function markNotificationRead(notificationId: string) {
+  const { error } = await supabase.rpc("mark_notification_read", {
+    p_notification_id: notificationId,
+  });
   if (error) throw error;
 }
 
-export async function markAllMyNotificationsRead() {
-  const { error } = await supabase
-    .from("notification_recipients")
-    .update({ read_at: new Date().toISOString() })
-    .is("read_at", null);
+/**
+ * ✅ BATCH (RPC): marca varias como leídas.
+ * (lo hacemos uno por uno para mantenerlo simple y a prueba de RLS)
+ */
+export async function markNotificationsRead(notificationIds: string[]) {
+  if (notificationIds.length === 0) return;
+  await Promise.all(notificationIds.map((id) => markNotificationRead(id)));
+}
 
+/**
+ * ✅ ALL (RPC): marca TODAS como leídas.
+ * Requiere SQL:
+ *   public.mark_all_notifications_read()
+ */
+export async function markAllMyNotificationsRead() {
+  const { error } = await supabase.rpc("mark_all_notifications_read");
   if (error) throw error;
 }

@@ -3,17 +3,16 @@ import type { Absence, AbsenceStatus } from "@/lib/supabase/absences";
 import { POLICIES, getPolicySafe, type BalanceKey, type PolicyUnit } from "@/lib/absencePolicies";
 import { countChargeableDays } from "@/lib/vacations/dateCount";
 import { DEFAULT_VACATION_SETTINGS } from "@/lib/vacations/settings";
-import { computeVacationBalance } from "@/lib/vacations/calc";
+import type { VacationBalance } from "@/lib/supabase/vacations";
 
 export type BalanceStats = {
   balanceKey: BalanceKey;
   unit: PolicyUnit;
-  allowance: number | null; // cupo
+  allowance: number | null; // cupo (si null = ilimitado)
   used: number;             // aprobado
   reserved: number;         // pendiente
   available: number | null; // cupo - used - reserved
-  // (opcional si querés mostrar “Acum” en el breakdown)
-  meta?: { entitlement?: number; carryover?: number };
+  meta?: Record<string, any>;
 };
 
 function daysBetweenInclusive(fromISO: string, toISO: string) {
@@ -42,17 +41,29 @@ function amountForAbsence(a: Absence, unit: PolicyUnit) {
 
   // day
   if (a.type === "vacaciones") {
+    // acá no tenemos holidaysISO en balances; si querés, se puede agregar como param
     return countChargeableDays(a.from, a.to, DEFAULT_VACATION_SETTINGS.countMode);
   }
 
   return daysBetweenInclusive(a.from, a.to);
 }
 
+/**
+ * Fuente de verdad vacaciones (nuevo):
+ * - Si pasás vacationDb (RPC), usamos eso.
+ * - Si no, dejamos seed default (fallback).
+ *
+ * Para el resto:
+ * - allowance = policy.allowance
+ * - used/reserved de ausencias aprobado/pendiente
+ */
 export function computeBalanceStatsByKey(
   absences: Absence[],
   year: number,
   month0: number | undefined,
-  startDateISO?: string | null
+  opts?: {
+    vacationDb?: VacationBalance | null; // ✅ nuevo: balance desde RPC
+  }
 ): Map<BalanceKey, BalanceStats> {
   const map = new Map<BalanceKey, BalanceStats>();
 
@@ -70,31 +81,36 @@ export function computeBalanceStatsByKey(
     });
   }
 
-  // 2) Vacaciones: override allowance con tu cálculo real (entitlement + carryover)
-  //    (si no hay startDateISO, igual dejamos algo razonable)
+  // 2) Vacaciones: si hay RPC, lo usamos como “balance final”
   const vacKey: BalanceKey = "VACATION_DAYS";
-  if (map.has(vacKey)) {
-    const vac = computeVacationBalance({
-      absences,
-      currentYear: year,
-      startDateISO: startDateISO ?? null,
-      settings: DEFAULT_VACATION_SETTINGS,
-    });
+  const vacDb = opts?.vacationDb ?? null;
 
-    const allowance = vac.entitlement + vac.carryover;
+  if (vacDb && map.has(vacKey)) {
+    const accrued = Math.floor(Number(vacDb.granted ?? 0));
+    const usedPast = Math.floor(Number(vacDb.used ?? 0));
+    const reservedApproved = Math.floor(Number((vacDb as any).reserved ?? 0));
+    const pending = Math.floor(Number((vacDb as any).reserved_pending ?? 0));
+    const available = Math.floor(Number(vacDb.available ?? 0));
 
+    // En tu esquema “estricto”, available ya viene neto (resta pending).
+    // Aun así dejamos used/reserved para visual.
     map.set(vacKey, {
       balanceKey: vacKey,
       unit: "day",
-      allowance,
-      used: 0,
-      reserved: 0,
-      available: allowance,
-      meta: { entitlement: vac.entitlement, carryover: vac.carryover },
+      allowance: accrued, // “cupo” para balances = acumulado total
+      used: usedPast + reservedApproved, // usado “real comprometido” si querés ver el total
+      reserved: pending,                 // pendiente separado
+      available,
+      meta: {
+        accrued,
+        used_past: usedPast,
+        reserved_approved: reservedApproved,
+        pending,
+      },
     });
   }
 
-  // 3) Movimientos (aprobado + pendiente)
+  // 3) Movimientos (aprobado + pendiente) para NO-vacaciones (si no hay vacDb)
   const relevant = absences.filter((a) => {
     if (a.status !== "aprobado" && a.status !== "pendiente") return false;
     if (month0 == null) return true;
@@ -108,6 +124,9 @@ export function computeBalanceStatsByKey(
         : getPolicySafe({ type: a.type as any, subtype: null });
 
     if (!policy?.deducts || !policy.deductsFrom) continue;
+
+    // Si VACATION_DAYS está “cerrado” por RPC, no recalculamos por ausencias acá
+    if (policy.deductsFrom === vacKey && vacDb) continue;
 
     const entry = map.get(policy.deductsFrom);
     if (!entry) continue;
@@ -125,6 +144,7 @@ export function computeBalanceStatsByKey(
 
   // 4) Recalcular available al final (por las dudas)
   for (const [k, v] of map) {
+    if (k === vacKey && vacDb) continue; // ya viene cerrado
     v.available = v.allowance == null ? null : Math.max(0, v.allowance - v.used - v.reserved);
     map.set(k, v);
   }
@@ -132,7 +152,6 @@ export function computeBalanceStatsByKey(
   return map;
 }
 
-// buildHistoryRows queda igual que lo tenías (solo muestra movimientos)
 export type HistoryRow = {
   id: string;
   dateFrom: string;

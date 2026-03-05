@@ -189,10 +189,10 @@ export async function approveAbsence(id: string, deduction?: DeductionPayload) {
   });
 
   if (error) {
-    const msg = (error as any)?.message?.toLowerCase?.() ?? "";
-    if (msg.includes("function") && msg.includes("does not exist")) {
-      return updateAbsenceStatus(id, "aprobado");
-    }
+      const msg = (error as any)?.message ?? "";
+      if (msg.toLowerCase().includes("saldo insuficiente")) {
+        throw new Error("Saldo insuficiente para aprobar estas vacaciones.");
+      }
     throw error;
   }
 

@@ -17,7 +17,6 @@ export default function OwnerEmployeeBalanceDetailPage() {
 
   const { isLoading, isAuthed, role } = useAuth();
 
-  // Para poder “cambiar de empleado” desde acá:
   const [loadingPeople, setLoadingPeople] = useState(true);
   const [people, setPeople] = useState<ProfileRow[]>([]);
 
@@ -35,7 +34,6 @@ export default function OwnerEmployeeBalanceDetailPage() {
   }, [isLoading, isAuthed, role, router]);
 
   useEffect(() => {
-    // cargamos lista para el selector
     (async () => {
       try {
         setLoadingPeople(true);
@@ -48,11 +46,11 @@ export default function OwnerEmployeeBalanceDetailPage() {
   }, []);
 
   const selectedPerson = useMemo(() => {
+    if (!userId) return null;
     return people.find((p) => p.id === userId) ?? null;
   }, [people, userId]);
 
-  const startDateISO = (selectedPerson as any)?.start_date ?? null; 
-  // ⚠️ Si tu campo se llama distinto (startDate), avisame y lo ajusto.
+  const startDateISO = selectedPerson?.start_date ?? null;
 
   return (
     <UserLayout
@@ -62,7 +60,6 @@ export default function OwnerEmployeeBalanceDetailPage() {
         subtitle: "Cupos, usados, reservados e historial.",
       }}
     >
-      {/* Top actions */}
       <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3">
@@ -83,19 +80,20 @@ export default function OwnerEmployeeBalanceDetailPage() {
             </div>
           </div>
 
-          {/* Selector para cambiar empleado */}
           <div className="w-full md:w-[420px]">
             <label className="text-[12px] text-lll-text-soft">Cambiar empleado</label>
             <select
               className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm"
-              value={userId}
+              value={userId ?? ""}
               disabled={loadingPeople || !people.length}
               onChange={(e) => {
                 const nextId = e.target.value;
+                if (!nextId) return;
                 router.push(`/owner/balances/employees/${nextId}`);
               }}
             >
-              {loadingPeople && <option value={userId}>Cargando…</option>}
+              {!userId && <option value="">Seleccioná…</option>}
+              {loadingPeople && userId ? <option value={userId}>Cargando…</option> : null}
               {!loadingPeople &&
                 people.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -107,7 +105,6 @@ export default function OwnerEmployeeBalanceDetailPage() {
         </div>
       </div>
 
-      {/* Balances */}
       <div className="mt-4">
         {userId ? (
           <BalancesView targetUserId={userId} startDateISO={startDateISO} />
