@@ -379,7 +379,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signUpWithPassword,
     resetPassword,
     signOut,
-    refreshProfile,
+    refreshProfile, 
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
