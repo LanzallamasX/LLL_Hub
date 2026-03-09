@@ -1,6 +1,13 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { supabase } from "@/lib/supabase/client";
 import { ensureMyProfileForAuth } from "@/lib/supabase/profile";
 
@@ -65,13 +72,10 @@ type AuthState = {
 
   role: Role;
 
-  // ✅ source of truth para UI (lo que viene de DB)
   profile: ProfileLite | null;
-
-  // ✅ derivado (usar en Header/Aside)
   displayName: string;
 
-  // legacy / compat (para no romper pantallas existentes)
+  // legacy / compat
   fullName: string | null;
   startDate: string | null;
   annualVacationDays: number | null;
@@ -117,7 +121,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     annualVacationDays: null,
   });
 
-  function setLoggedOutState() {
+  const mountedRef = useRef(true);
+  const hydratingRef = useRef(false);
+
+  const setLoggedOutState = useCallback(() => {
+    if (!mountedRef.current) return;
+
     setState({
       isLoading: false,
       isAuthed: false,
@@ -132,102 +141,141 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       startDate: null,
       annualVacationDays: null,
     });
-  }
-
-  async function hydrateFromProfile() {
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session?.user) {
-      setLoggedOutState();
-      return;
-    }
-
-    const email = session.user.email ?? null;
-
-    try {
-      // Gate definitivo (allowlist + crea/asegura profile)
-      const raw = (await ensureMyProfileForAuth()) as any;
-
-      if (!raw) {
-        // Si por alguna razón RPC devuelve null, tratamos como no permitido.
-        await supabase.auth.signOut();
-        setLoggedOutState();
-        return;
-      }
-
-      // Normalizamos shape (por filas viejas / nulls)
-      const normalized: ProfileLite = {
-        id: raw.id ?? session.user.id,
-        email: raw.email ?? email,
-
-        role: normalizeRole(raw.role),
-
-        full_name: raw.full_name ?? null,
-        first_name: raw.first_name ?? null,
-        last_name: raw.last_name ?? null,
-
-        team: raw.team ?? null,
-        start_date: raw.start_date ?? null,
-
-        annual_vacation_days:
-          typeof raw.annual_vacation_days === "number"
-            ? raw.annual_vacation_days
-            : 10,
-
-        active: typeof raw.active === "boolean" ? raw.active : true,
-      };
-
-      // ✅ Si está desactivado => logout
-      if (!normalized.active) {
-        await supabase.auth.signOut();
-        setLoggedOutState();
-        return;
-      }
-
-      const displayName = buildDisplayName(normalized, email);
-
-      setState({
-        isLoading: false,
-        isAuthed: true,
-        userId: session.user.id,
-        email,
-
-        role: normalized.role,
-
-        profile: normalized,
-        displayName,
-
-        // compat
-        fullName: displayName,
-        startDate: normalized.start_date ?? null,
-        annualVacationDays: normalized.annual_vacation_days ?? null,
-      });
-    } catch {
-      // NOT_ALLOWED / NOT_ACTIVE / errors => logout
-      await supabase.auth.signOut();
-      setLoggedOutState();
-    }
-  }
-
-  useEffect(() => {
-    hydrateFromProfile();
-
-    const { data: sub } = supabase.auth.onAuthStateChange(() => {
-      hydrateFromProfile();
-    });
-
-    return () => sub.subscription.unsubscribe();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // =========================
-  // MAGIC LINK
-  // =========================
+  const safeLocalSignOut = useCallback(async () => {
+    try {
+      // scope: "local" evita depender de que el refresh token siga siendo válido
+      await supabase.auth.signOut({ scope: "local" });
+    } catch (err) {
+      console.error("safeLocalSignOut error:", err);
+    } finally {
+      setLoggedOutState();
+    }
+  }, [setLoggedOutState]);
+
+  const hydrateFromProfile = useCallback(async () => {
+    if (hydratingRef.current) return;
+    hydratingRef.current = true;
+
+    try {
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError) {
+        console.error("getSession error:", sessionError);
+        await safeLocalSignOut();
+        return;
+      }
+
+      if (!session?.user) {
+        setLoggedOutState();
+        return;
+      }
+
+      const email = session.user.email ?? null;
+
+      try {
+        const raw = (await ensureMyProfileForAuth()) as any;
+
+        if (!raw) {
+          await safeLocalSignOut();
+          return;
+        }
+
+        const normalized: ProfileLite = {
+          id: raw.id ?? session.user.id,
+          email: raw.email ?? email,
+
+          role: normalizeRole(raw.role),
+
+          full_name: raw.full_name ?? null,
+          first_name: raw.first_name ?? null,
+          last_name: raw.last_name ?? null,
+
+          team: raw.team ?? null,
+          start_date: raw.start_date ?? null,
+
+          annual_vacation_days:
+            typeof raw.annual_vacation_days === "number"
+              ? raw.annual_vacation_days
+              : 10,
+
+          active: typeof raw.active === "boolean" ? raw.active : true,
+        };
+
+        if (!normalized.active) {
+          await safeLocalSignOut();
+          return;
+        }
+
+        const displayName = buildDisplayName(normalized, email);
+
+        if (!mountedRef.current) return;
+
+        setState({
+          isLoading: false,
+          isAuthed: true,
+          userId: session.user.id,
+          email,
+
+          role: normalized.role,
+
+          profile: normalized,
+          displayName,
+
+          // compat
+          fullName: displayName,
+          startDate: normalized.start_date ?? null,
+          annualVacationDays: normalized.annual_vacation_days ?? null,
+        });
+      } catch (err) {
+        console.error("ensureMyProfileForAuth error:", err);
+        await safeLocalSignOut();
+      }
+    } catch (err) {
+      console.error("hydrateFromProfile unexpected error:", err);
+      await safeLocalSignOut();
+    } finally {
+      hydratingRef.current = false;
+    }
+  }, [safeLocalSignOut, setLoggedOutState]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+
+    void hydrateFromProfile();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      // Para debug en producción si querés rastrear auth
+      console.log("[auth] onAuthStateChange:", event, !!session);
+
+      if (!mountedRef.current) return;
+
+      // Si la sesión desaparece, limpiamos de una
+      if (!session) {
+        setLoggedOutState();
+        return;
+      }
+
+      // Para SIGNED_IN / TOKEN_REFRESHED / PASSWORD_RECOVERY / USER_UPDATED
+      void hydrateFromProfile();
+    });
+
+    return () => {
+      mountedRef.current = false;
+      subscription.unsubscribe();
+    };
+  }, [hydrateFromProfile, setLoggedOutState]);
+
   async function signInWithMagicLink(email: string) {
     try {
       const e = email.trim().toLowerCase();
+
       const { error } = await supabase.auth.signInWithOtp({
         email: e,
         options: {
@@ -242,9 +290,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  // =========================
-  // PASSWORD AUTH
-  // =========================
   async function signInWithPassword(email: string, password: string) {
     try {
       const e = email.trim().toLowerCase();
@@ -253,8 +298,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email: e,
         password,
       });
-      if (error) return { ok: false, error: error.message };
 
+      if (error) return { ok: false, error: error.message };
       return { ok: true };
     } catch {
       return {
@@ -272,27 +317,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const e = email.trim().toLowerCase();
 
-      // 1) precheck allowlist
       const { data: allowed, error: allowedErr } = await supabase.rpc(
         "is_email_allowed",
         { p_email: e }
       );
 
       if (allowedErr) return { ok: false, error: allowedErr.message };
-      if (!allowed)
+
+      if (!allowed) {
         return {
           ok: false,
           error: "Este email no está habilitado para registrarse.",
         };
+      }
 
-      // 2) signup
       const { error } = await supabase.auth.signUp({
         email: e,
         password,
         options: {
           emailRedirectTo: `${window.location.origin}/auth/callback`,
           data: {
-            // legacy compat (si después querés, mandamos first/last desde el form)
             full_name: fullName?.trim() || undefined,
           },
         },
@@ -308,9 +352,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function resetPassword(email: string) {
     try {
       const e = email.trim().toLowerCase();
+
       const { error } = await supabase.auth.resetPasswordForEmail(e, {
         redirectTo: `${window.location.origin}/auth/reset-password`,
       });
+
       if (error) return { ok: false, error: error.message };
       return { ok: true };
     } catch {
@@ -319,8 +365,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function signOut() {
-    await supabase.auth.signOut();
-    setLoggedOutState();
+    await safeLocalSignOut();
   }
 
   async function refreshProfile() {
@@ -329,12 +374,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const value: AuthContextValue = {
     ...state,
-
     signInWithMagicLink,
     signInWithPassword,
     signUpWithPassword,
     resetPassword,
-
     signOut,
     refreshProfile,
   };
