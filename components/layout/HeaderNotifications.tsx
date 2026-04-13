@@ -114,7 +114,7 @@ async function toggle() {
             </button>
             <button
   type="button"
-  onClick={async () => {
+  onClick={async () => { 
     await markAllRead();
   }}
   className="text-[12px] px-2 py-1 rounded-lg bg-lll-bg-softer border border-lll-border text-lll-text-soft hover:text-lll-text"
