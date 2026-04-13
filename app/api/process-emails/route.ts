@@ -72,6 +72,6 @@ export async function GET() {
     return NextResponse.json({ ok: true, processed, total: emails.length });
   } catch (err) {
     console.error("Fatal error:", err);
-    return NextResponse.json({ error: "fatal" }, { status: 500 });
+    return NextResponse.json({ error: "fatal" }, { status: 500 }); 
   }
 }
