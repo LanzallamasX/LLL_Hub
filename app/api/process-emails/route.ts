@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { Resend } from "resend";
 
+
+
+export async function GET() {
+
 // 🔐 Validación de variables de entorno
 if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
   throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL");
@@ -19,16 +23,19 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-const resend = new Resend(process.env.RESEND_API_KEY);
 
-export async function GET() {
+
+const resend = new Resend(process.env.RESEND_API_KEY);  
+
+
+  
   try {
     // 1. Claim emails (usa SKIP LOCKED desde SQL)
     const { data: emails, error } = await supabase.rpc(
       "claim_pending_emails",
       { p_limit: 10 }
     );
-
+ 
     if (error) {
       console.error("Error claiming emails:", error);
       return NextResponse.json({ error: "claim_failed" }, { status: 500 });
