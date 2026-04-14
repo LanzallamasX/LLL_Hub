@@ -197,30 +197,15 @@ export default function AbsencesPageClient() {
     setEditing(null);
   }
 
-  async function handleSubmit(payload: NewAbsencePayload) {
-    if (editing) {
-      if (editing.status !== "pendiente") {
-        closeModal();
-        return;
-      }
-
-      await updateAbsence(editing.id, {
-        from: payload.from,
-        to: payload.to,
-        type: payload.type,
-        note: payload.note,
-        subtype: payload.subtype ?? null,
-        hours: payload.hours ?? null,
-      });
-
-      await refreshAll({ forceAbsences: true });
+  
+async function handleSubmit(payload: NewAbsencePayload) {
+  if (editing) {
+    if (editing.status !== "pendiente") {
       closeModal();
       return;
     }
 
-    await createAbsence({
-      userId: currentUser.userId,
-      userName: currentUser.userName,
+    await updateAbsence(editing.id, {
       from: payload.from,
       to: payload.to,
       type: payload.type,
@@ -231,7 +216,28 @@ export default function AbsencesPageClient() {
 
     await refreshAll({ forceAbsences: true });
     closeModal();
+    return;
   }
+
+  // 👉 CREACIÓN
+  await createAbsence({
+    userId: currentUser.userId,
+    userName: currentUser.userName,
+    from: payload.from,
+    to: payload.to,
+    type: payload.type,
+    note: payload.note,
+    subtype: payload.subtype ?? null,
+    hours: payload.hours ?? null,
+  });
+
+  // 🚀 DISPARA EMAIL (no bloquea)
+  fetch("/api/process-emails").catch(() => {});
+
+  await refreshAll({ forceAbsences: true });
+  closeModal();
+}
+
 
   // Gates
   if (isLoading) {

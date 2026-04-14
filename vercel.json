@@ -1,8 +1,0 @@
-{
-  "cron": [
-    {
-      "path": "/api/process-emails",
-      "schedule": "*/1 * * * *"
-    }
-  ]
-}

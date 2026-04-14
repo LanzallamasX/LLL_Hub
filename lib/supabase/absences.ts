@@ -171,8 +171,10 @@ export async function updateAbsenceStatus(
 
   if (error) throw error;
 
-  // OJO: si tu RPC retorna un row "absences" sin join, decided_by_profile no va a venir.
-  // Lo manejamos igual: mapRowToAbsence tolera decided_by_profile undefined.
+  // 🚀 DISPARA EMAIL
+  fetch("/api/process-emails").catch(() => {});
+
+
   return mapRowToAbsence(data as any);
 }
 
@@ -195,6 +197,10 @@ export async function approveAbsence(id: string, deduction?: DeductionPayload) {
       }
     throw error;
   }
+
+  // 🚀 DISPARA EMAIL (porque este camino NO pasa por updateAbsenceStatus)
+  fetch("/api/process-emails").catch(() => {});
+
 
   // ✅ aseguramos decided_by/decided_at por DB
   return updateAbsenceStatus(id, "aprobado");
