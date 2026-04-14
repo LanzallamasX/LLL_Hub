@@ -15,12 +15,11 @@ export async function GET() {
 
     let totalProcessed = 0;
     let loops = 0;
-    const MAX_LOOPS = 5; // evita loops infinitos
+    const MAX_LOOPS = 5;
 
     while (loops < MAX_LOOPS) {
       loops++;
 
-      // 🔐 claim batch
       const { data: emails, error } = await supabase.rpc(
         "claim_pending_emails",
         { p_limit: 10 }
@@ -32,11 +31,20 @@ export async function GET() {
       }
 
       if (!emails || emails.length === 0) {
-        break; // 🚀 no hay más para procesar
+        break; // 🚀 no hay más
       }
 
       for (const email of emails) {
         try {
+          // 🚨 VALIDACIÓN CLAVE
+          if (!email.to_email) {
+            await supabase.rpc("mark_email_error", {
+              p_id: email.id,
+              p_error: "missing recipient",
+            });
+            continue;
+          }
+
           const result = await resend.emails.send({
             from: "LLL Hub <no-reply@updates.lanzallamas.tv>",
             to: email.to_email,
@@ -55,7 +63,7 @@ export async function GET() {
 
           await supabase.rpc("mark_email_error", {
             p_id: email.id,
-            p_error: err?.message || "unknown",
+            p_error: err?.message || "unknown error",
           });
         }
       }
