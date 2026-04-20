@@ -333,7 +333,7 @@ export default function EditProfileModal({
         {/* Header */}
         <div className="p-4 border-b border-lll-border flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-sm font-semibold">Editar empleado</p>
+            <p className="text-sm font-semibold">Editar colaborador</p>
             <p className="text-[12px] text-lll-text-soft truncate">{user?.email ?? "—"}</p>
 
             <div className="mt-2 flex flex-wrap items-center gap-2">

@@ -644,7 +644,7 @@ export default function BalancesView({
 
           {!startDateISO ? (
             <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4 text-[12px] text-lll-text-soft">
-              Nota: este empleado no tiene <code>start_date</code> cargado; la antigüedad no se puede
+              Nota: este colaborador no tiene <code>start_date</code> cargado; la antigüedad no se puede
               calcular para mostrar el cupo anual.
             </div>
           ) : null}

@@ -120,7 +120,7 @@ export default function UserLayout({
                 className={navLinkClass(isOwnerBalancesEmployeesActive)}
               >
                 <span className="w-2 h-2 rounded bg-sky-400" />
-                Balance anual por empleado
+                Balance anual por colaborador
               </Link>
             </>
           ) : (
@@ -205,7 +205,7 @@ export default function UserLayout({
               {effectiveMode === "owner" && (
                 <input
                   className="hidden lg:block w-[340px] px-3 py-2 rounded-full bg-lll-bg-softer border border-lll-border text-sm placeholder:text-lll-text-soft outline-none"
-                  placeholder="Buscar empleado o equipo..."
+                  placeholder="Buscar colaborador o equipo..."
                 />
               )}
 

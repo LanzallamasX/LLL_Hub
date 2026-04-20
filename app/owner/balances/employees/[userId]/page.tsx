@@ -56,7 +56,7 @@ export default function OwnerEmployeeBalanceDetailPage() {
     <UserLayout
       mode="owner"
       header={{
-        title: "Balance de empleado",
+        title: "Balance de colaborador",
         subtitle: "Cupos, usados, reservados e historial.",
       }}
     >
@@ -81,7 +81,7 @@ export default function OwnerEmployeeBalanceDetailPage() {
           </div>
 
           <div className="w-full md:w-[420px]">
-            <label className="text-[12px] text-lll-text-soft">Cambiar empleado</label>
+            <label className="text-[12px] text-lll-text-soft">Cambiar colaborador</label>
             <select
               className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm"
               value={userId ?? ""}
@@ -110,7 +110,7 @@ export default function OwnerEmployeeBalanceDetailPage() {
           <BalancesView targetUserId={userId} startDateISO={startDateISO} />
         ) : (
           <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4 text-[12px] text-lll-text-soft">
-            No se encontró el empleado.
+            No se encontró el colaborador.
           </div>
         )}
       </div>

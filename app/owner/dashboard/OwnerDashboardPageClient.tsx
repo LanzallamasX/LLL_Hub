@@ -202,7 +202,7 @@ export default function OwnerDashboardPageClient() {
       <div className="mt-6 rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
         <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
           <div>
-            <p className="text-sm font-semibold">Buscar empleado</p>
+            <p className="text-sm font-semibold">Buscar colaborador</p>
             <p className="text-[12px] text-lll-text-soft">
               Filtrá por nombre para encontrar solicitudes rápido.
             </p>

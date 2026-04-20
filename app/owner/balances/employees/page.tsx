@@ -54,14 +54,14 @@ export default function OwnerBalancesEmployeesPage() {
     <UserLayout
       mode="owner"
       header={{
-        title: "Balances por empleado",
+        title: "Balances por colaborador",
         subtitle: "Elegí una persona para ver su balance y su historial.",
       }}
     >
       <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="min-w-0">
-            <p className="text-sm font-semibold">Empleados</p>
+            <p className="text-sm font-semibold">Colaboradores</p>
             <p className="text-[12px] text-lll-text-soft">
               {loading ? "Cargando…" : `${filtered.length} resultado(s)`}
             </p>
@@ -79,7 +79,7 @@ export default function OwnerBalancesEmployeesPage() {
       <div className="mt-4 rounded-2xl border border-lll-border bg-lll-bg-soft overflow-hidden">
         <div className="max-h-[70vh] overflow-y-auto scrollbar-thin">
           {loading ? (
-            <div className="p-4 text-[12px] text-lll-text-soft">Cargando empleados…</div>
+            <div className="p-4 text-[12px] text-lll-text-soft">Cargando colaboradores…</div>
           ) : filtered.length === 0 ? (
             <div className="p-4 text-[12px] text-lll-text-soft">
               No hay coincidencias con esa búsqueda.
