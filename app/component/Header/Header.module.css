@@ -1,0 +1,160 @@
+.wrapper {
+  position: fixed;
+  top: 30px;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  z-index: 50;
+}
+
+/* NAV CONTAINER */
+.nav {
+  width: 90%;
+  max-width: 600px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  padding: 10px 18px;
+
+  border-radius: 16px;
+
+  background: var(--color-white);
+  backdrop-filter: blur(20px);
+
+  border: 1px solid var(--color-border);
+
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  
+
+}
+
+/* LOGO */
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--color-text-dark);
+}
+
+.icon {
+  font-size: 16px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  box-shadow: 0 0 8px var(--color-primary);
+}
+
+.brand {
+  margin-left: 4px;
+}
+
+/* LINKS */
+.links {
+  display: flex;
+  gap: 28px;
+  font-family: var(--font-heading);
+}
+
+.links a {
+  font-size: 14px;
+  color: #000;
+  transition: 0.3s;
+}
+
+.links a:hover {
+  color: #888;
+}
+
+
+.desktop {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.mobileToggle {
+  display: none;
+  font-size: 24px;
+  cursor: pointer;
+  color: var(--color-text-dark)
+}
+
+
+.mobileMenu {
+  position: fixed;
+  inset: 0;
+  background: #0a0a0a;
+  z-index: 100;
+
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+
+    animation: fadeIn 0.3s ease;
+}
+
+.mobileHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 60px;
+}
+
+.mobileLinks {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  font-family: var(--font-heading);
+}
+
+.mobileLinks a {
+  font-size: var(--text-section);
+  font-weight: 500;
+  color: white;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  padding-bottom: 16px;
+}
+
+.mobileLinks a {
+  transition: 0.3s;
+}
+
+.mobileLinks a:hover {
+  color: #4ade80;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+
+@media (max-width: 768px) {
+  .desktop {
+    display: none;
+  }
+
+  .mobileToggle {
+    display: block;
+  }
+
+  .nav{
+    width: 75%;
+  }
+  
+}

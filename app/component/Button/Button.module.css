@@ -1,0 +1,18 @@
+/* CTA */
+.cta {
+  padding: 10px 20px;
+  border-radius: 12px;
+  border: 1px solid #ff6b3d;
+  color: var(--color-white);
+  background: transparent;
+  background: #ff6b3d;
+  transition: 0.3s;
+  font-weight: 700;
+  font-family: var(--font-heading);
+}
+
+.cta:hover {
+  background: var(--color-primary);
+  color: black;
+}
+
