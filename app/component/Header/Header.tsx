@@ -3,9 +3,12 @@
 import { useState } from "react";
 import styles from "./Header.module.css";
 import { Button } from "@/components/ui/button";
+import { useRouter } from "next/navigation";
 
 export default function Header() {
   const [open, setOpen] = useState(false);
+
+  const router = useRouter();
 
   return (
     <>
@@ -28,7 +31,9 @@ export default function Header() {
             </nav>
             */}
 
-            <Button>Iniciar sesión</Button>
+            <Button onClick={() => router.push("/login")}>
+              Iniciar sesión
+            </Button>
           </div>
 
           {/* Mobile hamburger */}

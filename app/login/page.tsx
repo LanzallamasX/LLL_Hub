@@ -90,6 +90,8 @@ export default function LoginPage() {
 
   if (!isLoading && isAuthed) return null;
 
+  const [showPassword, setShowPassword] = useState(false);
+
   return (
     <div className="min-h-screen bg-lll-bg text-lll-text flex items-center justify-center p-4">
       <div className="w-full max-w-md rounded-2xl border border-lll-border bg-lll-bg-soft p-6">
@@ -119,26 +121,39 @@ export default function LoginPage() {
           )}
         </div>
 
-        {/* Password */}
-        <div className="mt-4">
-          <label className="text-[12px] text-lll-text-soft">Contraseña</label>
-          <input
-            className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm"
-            value={password}
-            onChange={(e) => {
-              setPassword(e.target.value);
-              if (status !== "idle") resetUi();
-            }}
-            placeholder="Mínimo 6 caracteres"
-            type="password"
-            autoComplete="current-password"
-          />
-          {!passOk && password.length > 0 && (
-            <p className="mt-2 text-[12px] text-lll-text-soft">
-              La contraseña debe tener al menos 6 caracteres.
-            </p>
-          )}
-        </div>
+{/* Password */}
+<div className="mt-4">
+  <label className="text-[12px] text-lll-text-soft">Contraseña</label>
+
+  <div className="relative">
+    <input
+      className="mt-1 w-full px-3 py-2 pr-10 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm"
+      value={password}
+      onChange={(e) => {
+        setPassword(e.target.value);
+        if (status !== "idle") resetUi();
+      }}
+      placeholder="Mínimo 6 caracteres"
+      type={showPassword ? "text" : "password"}
+      autoComplete="current-password"
+    />
+
+    {/* Toggle ojo */}
+    <button
+      type="button"
+      onClick={() => setShowPassword(!showPassword)}
+      className="absolute right-3 top-[50%] -translate-y-1/2 text-lll-text-soft hover:text-white text-xl"
+    >
+      {showPassword ? "🙈" : "👁️"}
+    </button>
+  </div>
+
+  {!passOk && password.length > 0 && (
+    <p className="mt-2 text-[12px] text-lll-text-soft">
+      La contraseña debe tener al menos 6 caracteres.
+    </p>
+  )}
+</div>
 
         {/* Messages */}
         {info && (

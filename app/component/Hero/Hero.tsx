@@ -1,7 +1,11 @@
 import styles from "./Hero.module.css";
 import { Button } from "@/components/ui/button";
+import { useRouter } from "next/navigation";
 
 export default function Hero() {
+  const router = useRouter();
+
+
   return (
     <section className={styles.hero}>
 
@@ -16,7 +20,7 @@ export default function Hero() {
             Pedí vacaciones, registrá ausencias y seguí todo en un solo lugar.
           </p>
 
-          <Button>Iniciar sesión</Button>
+          <Button onClick={() => router.push("/login")}>Iniciar sesión</Button>
 
         </div>
 

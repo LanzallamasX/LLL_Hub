@@ -13,7 +13,7 @@ export default function Footer() {
         <div className="flex justify-center items-center space-around gap-24">
             {/* LEFT */}
             <div className={styles.left}>
-            <img src="/images/logo.svg" alt="Lanzallamas Logo" />
+            <img src="/images/logo.svg" alt="Noova Logo" />
             </div>
 
             {/* 
