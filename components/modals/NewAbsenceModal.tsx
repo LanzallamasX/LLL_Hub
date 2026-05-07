@@ -288,11 +288,16 @@ export default function NewAbsenceModal({
     }
 
     if (!from || !to || to < from) return false;
-    const s = new Date(from + "T00:00:00");
-    const e = new Date(to + "T00:00:00");
-    const days = Math.floor((e.getTime() - s.getTime()) / 86400000) + 1;
+    const days =
+      policy?.type === "home_office"
+        ? countChargeableDays(from, to, "business_days", holidaysISO)
+        : (() => {
+            const s = new Date(from + "T00:00:00");
+            const e = new Date(to + "T00:00:00");
+            return Math.floor((e.getTime() - s.getTime()) / 86400000) + 1;
+          })();
     return days > usage.available;
-  }, [usage, from, to, hours]);
+  }, [usage, policy?.type, from, to, hours, holidaysISO]);
 
   const requestedDays = useMemo(() => {
     if (!dateRangeOk) return 0;

@@ -2,7 +2,7 @@
 import type { Absence } from "@/lib/supabase/absences";
 import type { BalanceKey, PolicyUnit } from "@/lib/absencePolicies";
 import { buildDeductionFromAbsence } from "@/lib/absenceDeductions";
-import { clampRangeToYear } from "@/lib/vacations/dateCount";
+import { clampRangeToYear, countChargeableDays } from "@/lib/vacations/dateCount";
 
 export type Usage = {
   used: number;
@@ -66,7 +66,10 @@ export function computeUsageByBalanceKey(absences: Absence[], year: number): Map
       // pero para prorratear por año, necesitamos recalcular el "amount" solo dentro del año.
       // Regla MVP: días inclusivos (si tu buildDeduction usa business days para vacaciones,
       // esa lógica debería vivir ahí; acá nos quedamos con lo estable: prorrateo por rango).
-      amount = daysBetweenInclusive(clamped.fromISO, clamped.toISO);
+      amount =
+        a.type === "home_office"
+          ? countChargeableDays(clamped.fromISO, clamped.toISO, "business_days")
+          : daysBetweenInclusive(clamped.fromISO, clamped.toISO);
     }
 
     const prev = map.get(d.balanceKey);

@@ -254,7 +254,7 @@ export default function OwnerDashboardPageClient() {
                   </div>
 
                   <p className="mt-1 text-sm text-lll-text-soft">
-                    {getAbsenceTypeLabel(a.type)} · {formatAR(a.from)} →{" "}
+                    {getAbsenceTypeLabel(a.type, a.subtype ?? null)} · {formatAR(a.from)} →{" "}
                     {formatAR(a.to)}
                   </p>
 

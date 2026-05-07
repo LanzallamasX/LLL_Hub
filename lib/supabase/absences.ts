@@ -160,14 +160,19 @@ export async function createAbsence(input: CreateAbsenceInput): Promise<Absence>
   return mapRowToAbsence(data as any);
 }
 
+
+/*
 export async function updateAbsenceStatus(
   id: string,
   status: AbsenceStatus
 ): Promise<Absence> {
+
+
   const { data, error } = await supabase.rpc("set_absence_status", {
     p_absence_id: id,
     p_status: status,
   });
+
 
   if (error) throw error;
 
@@ -178,32 +183,75 @@ export async function updateAbsenceStatus(
   return mapRowToAbsence(data as any);
 }
 
-export async function approveAbsence(id: string, deduction?: DeductionPayload) {
-  if (!deduction) {
-    return updateAbsenceStatus(id, "aprobado");
-  }
+*/
 
-  const { data, error } = await supabase.rpc("approve_absence_with_deduction", {
-    p_absence_id: id,
-    p_balance_key: deduction.balanceKey,
-    p_unit: deduction.unit,
-    p_amount: deduction.amount,
+export async function updateAbsenceStatus(
+  id: string,
+  status: AbsenceStatus
+): Promise<Absence> {
+  const res = await fetch("/api/absences/approve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, status }),
   });
 
-  if (error) {
+  if (!res.ok) {
+    const text = await res.text();
+    console.error("API ERROR:", text);
+    throw new Error("Error updating absence status");
+  }
+
+  const { absence } = await res.json();
+  return mapRowToAbsence(absence);
+}
+
+export async function approveAbsence(
+  id: string,
+  deduction?: DeductionPayload
+): Promise<Absence> {
+
+  // 🔥 Si hay deducción → primero ejecutás RPC
+  if (deduction) {
+    const { error } = await supabase.rpc("approve_absence_with_deduction", {
+      p_absence_id: id,
+      p_balance_key: deduction.balanceKey,
+      p_unit: deduction.unit,
+      p_amount: deduction.amount,
+    });
+
+    if (error) {
       const msg = (error as any)?.message ?? "";
       if (msg.toLowerCase().includes("saldo insuficiente")) {
         throw new Error("Saldo insuficiente para aprobar estas vacaciones.");
       }
-    throw error;
+      throw error;
+    }
   }
 
-  // 🚀 DISPARA EMAIL (porque este camino NO pasa por updateAbsenceStatus)
+  // 🔥 SIEMPRE pasás por backend (calendar + consistencia)
+  const res = await fetch("/api/absences/approve", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      id,
+      status: "aprobado",
+    }),
+  });
+
+  // 🚀 emails
+  if (!res.ok) {
+    const text = await res.text();
+    console.error("API ERROR:", text);
+    throw new Error("Error approving absence");
+  }
+
+  const { absence } = await res.json();
+
   fetch("/api/process-emails").catch(() => {});
 
-
-  // ✅ aseguramos decided_by/decided_at por DB
-  return updateAbsenceStatus(id, "aprobado");
+  return mapRowToAbsence(absence);
 }
 
 export async function rejectAbsence(id: string) {

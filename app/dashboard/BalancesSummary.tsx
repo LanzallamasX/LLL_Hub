@@ -37,6 +37,8 @@ function unitLabel(unit: "day" | "hour", n: number) {
 
 function labelForKey(key: BalanceKey) {
   switch (key) {
+    case "VACATION_DAYS":
+      return "Vacaciones";    
     case "HOME_OFFICE_DAYS":
       return "Home Office";
     case "BIRTHDAY_DAY":
@@ -61,8 +63,6 @@ function labelForKey(key: BalanceKey) {
       return "Trámite personal";
     case "LIC_MEDICAL_APPT_HOURS":
       return "Turno médico";
-    case "VACATION_DAYS":
-      return "Vacaciones";
     default:
       return key;
   }

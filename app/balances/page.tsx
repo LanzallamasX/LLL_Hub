@@ -90,7 +90,7 @@ export default function BalancesPage() {
 
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
-  const [month0, setMonth0] = useState<number | "all">(now.getMonth());
+  const [month0, setMonth0] = useState<number | "all">("all");
   const [selectedKey, setSelectedKey] = useState<BalanceKey | null>(null);
 
   // ✅ UI: buscador + toggle
@@ -150,7 +150,7 @@ export default function BalancesPage() {
   }, [isAuthed, userId, periodAtISO]);
 
   const statsMap = useMemo(() => {
-    const map = computeBalanceStatsByKey(myAbsences, year, month0 === "all" ? undefined : month0);
+    const map = computeBalanceStatsByKey(myAbsences, year, undefined);
 
     // ✅ reemplaza cálculo local por RPC (migración + acumulado)
     if (vacRpc) {
@@ -326,7 +326,7 @@ export default function BalancesPage() {
             </div>
 
             <p className="md:ml-2 text-[12px] text-lll-text-soft">
-              Período: <span className="text-lll-text">{rangeLabel}</span>
+              Historial: <span className="text-lll-text">{rangeLabel}</span>
               <span className="mx-2">·</span>
               VacAt: <span className="text-lll-text">{periodAtISO}</span>
             </p>

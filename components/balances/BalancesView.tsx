@@ -120,13 +120,13 @@ export default function BalancesView({
   targetUserId: string;
   startDateISO: string | null;
 }) {
-  const { absences, loadMyAbsences } = useAbsences();
+  const { absences, loadAllAbsences } = useAbsences();
   const didLoad = useRef(false);
 
   // periodo UI
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
-  const [month0, setMonth0] = useState<number | "all">(now.getMonth());
+  const [month0, setMonth0] = useState<number | "all">("all");
   const [selectedKey, setSelectedKey] = useState<BalanceKey | null>(null);
 
   // UI: buscador + toggle
@@ -141,9 +141,9 @@ export default function BalancesView({
     if (!targetUserId) return;
     if (!didLoad.current) {
       didLoad.current = true;
-      loadMyAbsences(targetUserId);
+      loadAllAbsences();
     }
-  }, [targetUserId, loadMyAbsences]);
+  }, [targetUserId, loadAllAbsences]);
 
   const myAbsences = useMemo(() => {
     if (!targetUserId) return [];
@@ -202,11 +202,7 @@ export default function BalancesView({
   }, [targetUserId, periodAtISO]);
 
   const statsMap = useMemo(() => {
-    const map = computeBalanceStatsByKey(
-      myAbsences,
-      year,
-      month0 === "all" ? undefined : month0
-    );
+    const map = computeBalanceStatsByKey(myAbsences, year, undefined);
 
     // ✅ Vacaciones: el gráfico usa el acumulado real (granted)
     if (vacRpc) {
@@ -371,7 +367,7 @@ export default function BalancesView({
             </div>
 
             <p className="md:ml-2 text-[12px] text-lll-text-soft">
-              Período: <span className="text-lll-text">{rangeLabel}</span>
+              Historial: <span className="text-lll-text">{rangeLabel}</span>
               <span className="ml-2 text-lll-text-soft">
                 · vacAt: <span className="text-lll-text">{periodAtISO}</span>
               </span>

@@ -54,7 +54,7 @@ export function AbsencesProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   const pendingCount = useMemo(
-    () => absences.filter((a) => a.status === "pendiente").length,
+    () => absences.filter((a) => a?.status === "pendiente").length,
     [absences]
   );
 

@@ -28,10 +28,15 @@ export const ABSENCE_POLICIES: Record<AbsenceTypeId, AbsencePolicy> = {
     quota: { kind: "none" },
     countsWeekends: true, // irrelevante porque no tiene cuota
   },
-  cumpleanos: {
-    id: "cumpleanos",
+  cumple: {
+    id: "cumple",
     quota: { kind: "annual_once" }, // 1 vez por año
     countsWeekends: true,           // irrelevante por ser 1 día
     forceSingleDay: true,
+  },
+  licencia: {
+    id: "licencia",
+    quota: { kind: "none" },
+    countsWeekends: true,
   },
 };

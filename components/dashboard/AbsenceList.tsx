@@ -92,7 +92,7 @@ async function onDelete(a: Absence) {
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-sm font-medium">
-                    {getAbsenceTypeLabel(a.type)}
+                    {getAbsenceTypeLabel(a.type, a.subtype ?? null)}
                   </p>
 
                   <p className="mt-2 text-[12px] text-lll-text-soft">

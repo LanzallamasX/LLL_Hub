@@ -33,19 +33,58 @@ function overlapsMonth(a: Absence, year: number, month0: number) {
   return from < end && to > start;
 }
 
-function amountForAbsence(a: Absence, unit: PolicyUnit) {
+function overlapsYear(a: Absence, year: number) {
+  const start = new Date(year, 0, 1).getTime();
+  const end = new Date(year + 1, 0, 1).getTime(); // exclusive
+
+  const from = new Date(a.from + "T00:00:00").getTime();
+  const to = new Date(a.to + "T00:00:00").getTime() + 86400000; // inclusive -> exclusive
+
+  return from < end && to > start;
+}
+
+function periodBounds(year: number, month0?: number) {
+  if (month0 == null) {
+    return { fromISO: `${year}-01-01`, toISO: `${year}-12-31` };
+  }
+
+  const from = new Date(year, month0, 1);
+  const to = new Date(year, month0 + 1, 0);
+  const pad = (n: number) => String(n).padStart(2, "0");
+
+  return {
+    fromISO: `${from.getFullYear()}-${pad(from.getMonth() + 1)}-${pad(from.getDate())}`,
+    toISO: `${to.getFullYear()}-${pad(to.getMonth() + 1)}-${pad(to.getDate())}`,
+  };
+}
+
+function clampRange(fromISO: string, toISO: string, minISO: string, maxISO: string) {
+  const from = fromISO > minISO ? fromISO : minISO;
+  const to = toISO < maxISO ? toISO : maxISO;
+  if (to < from) return null;
+  return { fromISO: from, toISO: to };
+}
+
+function amountForAbsence(a: Absence, unit: PolicyUnit, range?: { fromISO: string; toISO: string }) {
   if (unit === "hour") {
     const h = Number((a as any).hours);
     return Number.isFinite(h) && h > 0 ? h : 0;
   }
 
+  const fromISO = range?.fromISO ?? a.from;
+  const toISO = range?.toISO ?? a.to;
+
   // day
   if (a.type === "vacaciones") {
     // acá no tenemos holidaysISO en balances; si querés, se puede agregar como param
-    return countChargeableDays(a.from, a.to, DEFAULT_VACATION_SETTINGS.countMode);
+    return countChargeableDays(fromISO, toISO, DEFAULT_VACATION_SETTINGS.countMode);
   }
 
-  return daysBetweenInclusive(a.from, a.to);
+  if (a.type === "home_office") {
+    return countChargeableDays(fromISO, toISO, "business_days");
+  }
+
+  return daysBetweenInclusive(fromISO, toISO);
 }
 
 /**
@@ -113,7 +152,7 @@ export function computeBalanceStatsByKey(
   // 3) Movimientos (aprobado + pendiente) para NO-vacaciones (si no hay vacDb)
   const relevant = absences.filter((a) => {
     if (a.status !== "aprobado" && a.status !== "pendiente") return false;
-    if (month0 == null) return true;
+    if (month0 == null) return overlapsYear(a, year);
     return overlapsMonth(a, year, month0);
   });
 
@@ -131,7 +170,11 @@ export function computeBalanceStatsByKey(
     const entry = map.get(policy.deductsFrom);
     if (!entry) continue;
 
-    const amt = amountForAbsence(a, policy.unit);
+    const bounds = periodBounds(year, month0);
+    const range = clampRange(a.from, a.to, bounds.fromISO, bounds.toISO);
+    if (!range) continue;
+
+    const amt = amountForAbsence(a, policy.unit, range);
 
     if (a.status === "aprobado") entry.used += amt;
     if (a.status === "pendiente") entry.reserved += amt;
@@ -167,7 +210,7 @@ export type HistoryRow = {
 export function buildHistoryRows(absences: Absence[], year: number, month0?: number): HistoryRow[] {
   const relevant = absences.filter((a) => {
     if (a.status !== "aprobado" && a.status !== "pendiente") return false;
-    if (month0 == null) return true;
+    if (month0 == null) return overlapsYear(a, year);
     return overlapsMonth(a, year, month0);
   });
 
@@ -181,7 +224,11 @@ export function buildHistoryRows(absences: Absence[], year: number, month0?: num
 
     if (!policy?.deducts || !policy.deductsFrom) continue;
 
-    const amt = amountForAbsence(a, policy.unit);
+    const bounds = periodBounds(year, month0);
+    const range = clampRange(a.from, a.to, bounds.fromISO, bounds.toISO);
+    if (!range) continue;
+
+    const amt = amountForAbsence(a, policy.unit, range);
 
     rows.push({
       id: a.id,

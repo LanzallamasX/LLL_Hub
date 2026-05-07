@@ -7,7 +7,7 @@ export default function OwnerBalancesRedirectPage() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace("/balances");
+    router.replace("/owner/balances/employees");
   }, [router]);
 
   return null;

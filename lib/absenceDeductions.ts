@@ -2,6 +2,7 @@
 import type { Absence } from "@/lib/supabase/absences";
 import { getPolicySafe, type AbsenceType } from "@/lib/absencePolicies";
 import type { BalanceKey, PolicyUnit, LicenseSubtype } from "@/lib/absencePolicies";
+import { countChargeableDays } from "@/lib/vacations/dateCount";
 
 export type DeductionPayload = {
   balanceKey: BalanceKey;
@@ -39,7 +40,9 @@ export function buildDeductionFromAbsence(absence: Absence): DeductionPayload | 
 
   const amount =
     policy.unit === "day"
-      ? daysBetweenInclusive(absence.from, absence.to)
+      ? type === "home_office"
+        ? countChargeableDays(absence.from, absence.to, "business_days")
+        : daysBetweenInclusive(absence.from, absence.to)
       : (() => {
           const h = Number(absence.hours);
           if (!Number.isFinite(h) || h <= 0) {

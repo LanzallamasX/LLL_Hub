@@ -32,6 +32,10 @@ export default function LoginPage() {
     }
   }, [isLoading, isAuthed, router]);
 
+const [showPassword, setShowPassword] = useState(false); // 👈 MOVER ACA (ANTES DEL RETURN)
+
+if (!isLoading && isAuthed) return null;
+
   function resetUi() {
     setStatus("idle");
     setError(null);
@@ -88,9 +92,7 @@ export default function LoginPage() {
     );
   }
 
-  if (!isLoading && isAuthed) return null;
 
-  const [showPassword, setShowPassword] = useState(false);
 
   return (
     <div className="min-h-screen bg-lll-bg text-lll-text flex items-center justify-center p-4">
