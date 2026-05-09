@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import UserLayout from "@/components/layout/UserLayout";
@@ -36,7 +36,7 @@ import { processPendingEmails } from "@/lib/email/processPendingEmails";
 
 
 
-export default function DashboardPage() {
+function DashboardPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -404,5 +404,29 @@ const [startDateISO, setStartDateISO] = useState<string | null>(null);
 
 />
     </UserLayout>
+  );
+}
+
+function DashboardLoading() {
+  return (
+    <UserLayout
+      mode="user"
+      header={{
+        title: "Dashboard",
+        subtitle: "Tu vista personal de solicitudes, calendario y saldos.",
+      }}
+    >
+      <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-6 text-sm text-lll-text-soft">
+        Cargando dashboard...
+      </div>
+    </UserLayout>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<DashboardLoading />}>
+      <DashboardPageContent />
+    </Suspense>
   );
 }
