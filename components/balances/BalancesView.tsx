@@ -140,6 +140,7 @@ type VacRpc = {
   granted: number;
   used: number;
   reserved: number;
+  reservedPending?: number;
   available: number;
   policyMode?: "anniversary" | "october";
   periodStart?: string | null;
@@ -259,6 +260,7 @@ export default function BalancesView({
           granted: Number(data?.granted ?? 0),
           used: Number(data?.used ?? 0),
           reserved: Number(data?.reserved ?? 0),
+          reservedPending: Number(data?.reserved_pending ?? 0),
           available: Number(data?.available ?? 0),
           policyMode: vacModel,
           periodStart: data?.period_start ?? null,
@@ -284,7 +286,8 @@ export default function BalancesView({
     const map = computeBalanceStatsByKey(
       scopedAbsences,
       year,
-      typeof month0 === "number" ? month0 : undefined
+      typeof month0 === "number" ? month0 : undefined,
+      { asOfISO: periodAtISO }
     );
 
     // ✅ Vacaciones: el gráfico usa el acumulado real (granted)
@@ -294,7 +297,7 @@ export default function BalancesView({
         unit: "day",
         allowance: vacRpc.granted, // TOTAL acumulado (para Bar/Donut)
         used: vacRpc.used,
-        reserved: vacRpc.reserved,
+        reserved: vacRpc.reserved + (vacRpc.reservedPending ?? 0),
         available: vacRpc.available,
       });
     }

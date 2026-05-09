@@ -9,8 +9,8 @@ export type BalanceStats = {
   balanceKey: BalanceKey;
   unit: PolicyUnit;
   allowance: number | null; // cupo (si null = ilimitado)
-  used: number;             // aprobado
-  reserved: number;         // pendiente
+  used: number;             // aprobado pasado
+  reserved: number;         // aprobado futuro/en curso + pendiente
   available: number | null; // cupo - used - reserved
   meta?: Record<string, any>;
 };
@@ -101,10 +101,12 @@ export function computeBalanceStatsByKey(
   year: number,
   month0: number | undefined,
   opts?: {
-    vacationDb?: VacationBalance | null; // ✅ nuevo: balance desde RPC
+    vacationDb?: VacationBalance | null;
+    asOfISO?: string;
   }
 ): Map<BalanceKey, BalanceStats> {
   const map = new Map<BalanceKey, BalanceStats>();
+  const asOfISO = opts?.asOfISO ?? new Date().toISOString().slice(0, 10);
 
   // 1) Seed: todas las policies que deducen (para que aparezcan aunque estén en 0)
   for (const p of POLICIES) {
@@ -131,14 +133,14 @@ export function computeBalanceStatsByKey(
     const pending = Math.floor(Number((vacDb as any).reserved_pending ?? 0));
     const available = Math.floor(Number(vacDb.available ?? 0));
 
-    // En tu esquema “estricto”, available ya viene neto (resta pending).
-    // Aun así dejamos used/reserved para visual.
+    // En Balances, "Reservado" es todo lo comprometido no usado:
+    // aprobadas futuras/en curso + pendientes.
     map.set(vacKey, {
       balanceKey: vacKey,
       unit: "day",
       allowance: accrued, // “cupo” para balances = acumulado total
-      used: usedPast + reservedApproved, // usado “real comprometido” si querés ver el total
-      reserved: pending,                 // pendiente separado
+      used: usedPast,
+      reserved: reservedApproved + pending,
       available,
       meta: {
         accrued,
@@ -176,7 +178,8 @@ export function computeBalanceStatsByKey(
 
     const amt = amountForAbsence(a, policy.unit, range);
 
-    if (a.status === "aprobado") entry.used += amt;
+    if (a.status === "aprobado" && a.to < asOfISO) entry.used += amt;
+    if (a.status === "aprobado" && a.to >= asOfISO) entry.reserved += amt;
     if (a.status === "pendiente") entry.reserved += amt;
 
     entry.available =

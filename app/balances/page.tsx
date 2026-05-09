@@ -207,6 +207,7 @@ export default function BalancesPage() {
     granted: number;
     used: number;
     reserved: number;
+    reservedPending: number;
     available: number;
   } | null>(null);
 
@@ -231,6 +232,7 @@ export default function BalancesPage() {
           granted: Number(data?.granted ?? 0),
           used: Number(data?.used ?? 0),
           reserved: Number(data?.reserved ?? 0),
+          reservedPending: Number(data?.reserved_pending ?? 0),
           available: Number(data?.available ?? 0),
         });
       } catch (e) {
@@ -246,7 +248,8 @@ export default function BalancesPage() {
     const map = computeBalanceStatsByKey(
       scopedAbsences,
       year,
-      typeof month0 === "number" ? month0 : undefined
+      typeof month0 === "number" ? month0 : undefined,
+      { asOfISO: periodAtISO }
     );
 
     // ✅ reemplaza cálculo local por RPC (migración + acumulado)
@@ -256,7 +259,7 @@ export default function BalancesPage() {
         unit: "day",
         allowance: vacRpc.granted,
         used: vacRpc.used,
-        reserved: vacRpc.reserved,
+        reserved: vacRpc.reserved + vacRpc.reservedPending,
         available: vacRpc.available,
       });
     }
