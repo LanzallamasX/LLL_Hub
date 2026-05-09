@@ -105,7 +105,7 @@ export default function Home() {
               <div className="text-orange-400 text-sm">
                 Paso {i + 1}
               </div>
-              <h3 className="text-3xl font-semibold">
+              <h3 className="text-[clamp(1.5rem,5vw,1.875rem)] font-semibold leading-tight">
                 {step.title}
               </h3>
               <p className="text-slate-400 max-w-md">

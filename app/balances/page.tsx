@@ -15,6 +15,12 @@ import { POLICIES, type BalanceKey, type PolicyUnit } from "@/lib/absencePolicie
 import { getAbsenceTypeLabel } from "@/lib/absenceTypes";
 
 import { supabase } from "@/lib/supabase/client";
+import {
+  fetchVacationPolicySettings,
+  normalizeVacationPolicyMode,
+  type VacationPolicyMode,
+} from "@/lib/supabase/vacationPolicy";
+import { formatSeniority } from "@/lib/vacations/seniority";
 
 function monthLabel(year: number, month0: number) {
   const d = new Date(year, month0, 1);
@@ -69,6 +75,30 @@ type StatRow = {
   available: number | null;
 };
 
+type BalancePeriod = number | "toDate" | "all";
+
+function cutoffForYear(year: number) {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  if (year < currentYear) return `${year}-12-31`;
+  if (year > currentYear) return toISODate(endOfMonth(year, 0));
+  return toISODate(endOfMonth(year, now.getMonth()));
+}
+
+function clampAbsencesThrough<T extends { from: string; to: string }>(items: T[], maxISO: string): T[] {
+  return items
+    .filter((a) => a.from <= maxISO)
+    .map((a) => (a.to > maxISO ? { ...a, to: maxISO } : a));
+}
+
+function visibleMonthIndexes(year: number) {
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  if (year < currentYear) return Array.from({ length: 12 }, (_, i) => i);
+  if (year > currentYear) return [];
+  return Array.from({ length: now.getMonth() + 1 }, (_, i) => i);
+}
+
 export default function BalancesPage() {
   const router = useRouter();
   const { userId, isAuthed, isLoading } = useAuth();
@@ -90,12 +120,38 @@ export default function BalancesPage() {
 
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
-  const [month0, setMonth0] = useState<number | "all">("all");
+  const [month0, setMonth0] = useState<BalancePeriod>("toDate");
   const [selectedKey, setSelectedKey] = useState<BalanceKey | null>(null);
 
   // ✅ UI: buscador + toggle
   const [q, setQ] = useState("");
   const [showAll, setShowAll] = useState(false);
+  const [startDateISO, setStartDateISO] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isAuthed || !userId) return;
+
+    let alive = true;
+
+    supabase
+      .from("profiles")
+      .select("start_date")
+      .eq("id", userId)
+      .single()
+      .then(({ data, error }) => {
+        if (!alive) return;
+        if (error) {
+          console.error("profile start_date error", error);
+          setStartDateISO(null);
+          return;
+        }
+        setStartDateISO(data?.start_date ?? null);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [isAuthed, userId]);
 
   const myAbsences = useMemo(() => {
     if (!userId) return [];
@@ -103,16 +159,45 @@ export default function BalancesPage() {
   }, [absences, userId]);
 
   // ✅ vacAt desde URL (para testear): /balances?vacAt=YYYY-MM-DD
-  const vacAtFromUrl = useMemo(() => {
-    if (typeof window === "undefined") return null;
-    const sp = new URLSearchParams(window.location.search);
-    const v = (sp.get("vacAt") ?? "").trim();
-    return v || null;
-  }, []);
+  const [vacAtFromUrl, setVacAtFromUrl] = useState<string | null>(null);
+  const [vacModel, setVacModel] = useState<VacationPolicyMode>("anniversary");
+
+  useEffect(() => {
+    if (!isAuthed) return;
+
+    let alive = true;
+
+    (async () => {
+      const sp = new URLSearchParams(window.location.search);
+      const at = (sp.get("vacAt") ?? "").trim();
+      const v = (sp.get("vacModel") ?? sp.get("vacMode") ?? "").trim().toLowerCase();
+
+      if (!alive) return;
+      setVacAtFromUrl(at || null);
+
+      if (v === "october" || v === "anniversary") {
+        setVacModel(normalizeVacationPolicyMode(v));
+        return;
+      }
+
+      try {
+        const policy = await fetchVacationPolicySettings();
+        if (alive) setVacModel(policy.policy_mode);
+      } catch (e) {
+        console.error("fetchVacationPolicySettings error", e);
+        if (alive) setVacModel("anniversary");
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [isAuthed]);
 
   // ✅ fecha de evaluación de vacaciones según el período elegido
   const periodAtISO = useMemo(() => {
     if (vacAtFromUrl) return vacAtFromUrl;
+    if (month0 === "toDate") return cutoffForYear(year);
     if (month0 === "all") return `${year}-12-31`;
     return toISODate(endOfMonth(year, month0));
   }, [vacAtFromUrl, year, month0]);
@@ -130,9 +215,15 @@ export default function BalancesPage() {
 
     (async () => {
       try {
-        const { data, error } = await supabase.rpc("get_my_vacation_balance_at", {
-          p_at: periodAtISO,
-        });
+        const { data, error } =
+          vacModel === "october"
+            ? await supabase.rpc("get_vacation_balance_october_preview_for_user_at", {
+                p_user_id: userId,
+                p_at: periodAtISO,
+              })
+            : await supabase.rpc("get_my_vacation_balance_at", {
+                p_at: periodAtISO,
+              });
 
         if (error) throw error;
 
@@ -147,10 +238,16 @@ export default function BalancesPage() {
         setVacRpc(null);
       }
     })();
-  }, [isAuthed, userId, periodAtISO]);
+  }, [isAuthed, userId, periodAtISO, vacModel]);
 
   const statsMap = useMemo(() => {
-    const map = computeBalanceStatsByKey(myAbsences, year, undefined);
+    const scopedAbsences =
+      month0 === "toDate" ? clampAbsencesThrough(myAbsences, periodAtISO) : myAbsences;
+    const map = computeBalanceStatsByKey(
+      scopedAbsences,
+      year,
+      typeof month0 === "number" ? month0 : undefined
+    );
 
     // ✅ reemplaza cálculo local por RPC (migración + acumulado)
     if (vacRpc) {
@@ -165,7 +262,7 @@ export default function BalancesPage() {
     }
 
     return map;
-  }, [myAbsences, year, month0, vacRpc]);
+  }, [myAbsences, year, month0, periodAtISO, vacRpc]);
 
   const breakdownCatalog = useMemo(() => {
     const rows = POLICIES.filter((p) => p.deducts && p.deductsFrom).map((p) => ({
@@ -206,6 +303,8 @@ export default function BalancesPage() {
 
     // UX: primero con cupo; luego alfabético
     return list.sort((a, b) => {
+      if (a.balanceKey === "VACATION_DAYS") return -1;
+      if (b.balanceKey === "VACATION_DAYS") return 1;
       const aHas = a.allowance != null ? 0 : 1;
       const bHas = b.allowance != null ? 0 : 1;
       if (aHas !== bHas) return aHas - bHas;
@@ -213,9 +312,20 @@ export default function BalancesPage() {
     });
   }, [breakdownCatalog, statsMap]);
 
+  const seniorityLabel = useMemo(
+    () => formatSeniority(startDateISO, periodAtISO),
+    [startDateISO, periodAtISO]
+  );
+
   const history = useMemo(() => {
-    return buildHistoryRows(myAbsences, year, month0 === "all" ? undefined : month0);
-  }, [myAbsences, year, month0]);
+    const scopedAbsences =
+      month0 === "toDate" ? clampAbsencesThrough(myAbsences, periodAtISO) : myAbsences;
+    return buildHistoryRows(
+      scopedAbsences,
+      year,
+      typeof month0 === "number" ? month0 : undefined
+    );
+  }, [myAbsences, year, month0, periodAtISO]);
 
   const exportRows = useMemo(() => {
     return history.map((r) => ({
@@ -231,7 +341,12 @@ export default function BalancesPage() {
     }));
   }, [history]);
 
-  const rangeLabel = month0 === "all" ? `Año ${year}` : monthLabel(year, month0);
+  const rangeLabel =
+    month0 === "toDate"
+      ? `Hasta ${monthLabel(year, new Date(periodAtISO + "T00:00:00").getMonth())}`
+      : month0 === "all"
+        ? `Año ${year} (proyección)`
+        : monthLabel(year, month0);
 
   // ✅ FILTRO AGRESIVO:
   // - si hay búsqueda: mostramos todo (respeta intención del usuario)
@@ -264,6 +379,14 @@ export default function BalancesPage() {
     // ocultas = total - visibles (con regla agresiva)
     return Math.max(0, statsList.length - filteredStatsList.length);
   }, [statsList.length, filteredStatsList.length, q, showAll]);
+
+  const visibleMonths = useMemo(() => visibleMonthIndexes(year), [year]);
+
+  useEffect(() => {
+    if (typeof month0 === "number" && !visibleMonths.includes(month0)) {
+      setMonth0("toDate");
+    }
+  }, [month0, visibleMonths]);
 
   // ✅ Selección consistente con el filtro
   useEffect(() => {
@@ -313,11 +436,11 @@ export default function BalancesPage() {
                 value={month0}
                 onChange={(e) => {
                   const v = e.target.value;
-                  setMonth0(v === "all" ? "all" : Number(v));
+                  setMonth0(v === "toDate" ? v : Number(v));
                 }}
               >
-                <option value="all">Todo el año</option>
-                {Array.from({ length: 12 }).map((_, i) => (
+                <option value="toDate">Hasta mes actual</option>
+                {visibleMonths.map((i) => (
                   <option key={i} value={i}>
                     {new Date(2020, i, 1).toLocaleDateString("es-AR", { month: "long" })}
                   </option>
@@ -329,6 +452,11 @@ export default function BalancesPage() {
               Historial: <span className="text-lll-text">{rangeLabel}</span>
               <span className="mx-2">·</span>
               VacAt: <span className="text-lll-text">{periodAtISO}</span>
+              {vacModel === "october" ? (
+                <span className="ml-2 rounded-full border border-amber-400/30 bg-amber-500/10 px-2 py-0.5 text-amber-200">
+                  modelo octubre
+                </span>
+              ) : null}
             </p>
           </div>
 
@@ -340,7 +468,7 @@ export default function BalancesPage() {
               onClick={() => {
                 if (!exportRows.length) return;
                 downloadCSV(
-                  `balances_${year}_${month0 === "all" ? "all" : month0 + 1}.csv`,
+                  `balances_${year}_${typeof month0 === "number" ? month0 + 1 : month0}.csv`,
                   toCSV(exportRows)
                 );
               }}
@@ -430,11 +558,16 @@ export default function BalancesPage() {
                         <p className="mt-1 text-[12px] text-lll-text-soft">
                           Cupo: {s.allowance == null ? "—" : `${s.allowance}${unit}`}
                         </p>
+                        {s.balanceKey === "VACATION_DAYS" && seniorityLabel ? (
+                          <p className="mt-1 text-[12px] text-lll-text-soft">
+                            Antiguedad: <span className="text-lll-text">{seniorityLabel}</span>
+                          </p>
+                        ) : null}
                       </div>
 
                       <div className="text-right shrink-0">
                         <p className="text-[11px] text-lll-text-soft">Disponible</p>
-                        <p className="text-xl font-bold leading-none">
+                        <p className="text-[clamp(1.125rem,4vw,1.25rem)] font-bold leading-none">
                           {s.available == null ? "—" : s.available}
                           {s.allowance == null ? null : (
                             <span className="ml-1 text-[12px] font-semibold text-lll-text-soft">
@@ -466,19 +599,24 @@ export default function BalancesPage() {
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div className="min-w-0">
                   <p className="text-sm font-semibold">Detalle</p>
-                  <p className="mt-1 text-lg font-bold truncate">{selected.label}</p>
+                  <p className="mt-1 text-[clamp(1rem,3.5vw,1.125rem)] font-bold leading-tight truncate">{selected.label}</p>
                   <p className="mt-1 text-[12px] text-lll-text-soft">
                     Unidad: {fmtUnit(selected.unit)} · Cupo:{" "}
                     {selected.allowance == null
                       ? "—"
                       : `${selected.allowance}${fmtUnit(selected.unit)}`}
                   </p>
+                  {selected.balanceKey === "VACATION_DAYS" && seniorityLabel ? (
+                    <p className="mt-1 text-[12px] text-lll-text-soft">
+                      Antiguedad: <span className="text-lll-text">{seniorityLabel}</span>
+                    </p>
+                  ) : null}
                 </div>
 
                 <div className="grid grid-cols-3 gap-2 w-full md:w-auto">
                   <div className="rounded-xl border border-lll-border bg-lll-bg-softer px-3 py-2">
                     <p className="text-[11px] text-lll-text-soft">Disponible</p>
-                    <p className="text-lg font-bold">
+                    <p className="text-[clamp(1rem,3.5vw,1.125rem)] font-bold leading-tight">
                       {selected.available == null
                         ? "—"
                         : `${selected.available}${fmtUnit(selected.unit)}`}
@@ -486,14 +624,14 @@ export default function BalancesPage() {
                   </div>
                   <div className="rounded-xl border border-lll-border bg-lll-bg-softer px-3 py-2">
                     <p className="text-[11px] text-lll-text-soft">Usado</p>
-                    <p className="text-lg font-bold">
+                    <p className="text-[clamp(1rem,3.5vw,1.125rem)] font-bold leading-tight">
                       {selected.used}
                       {fmtUnit(selected.unit)}
                     </p>
                   </div>
                   <div className="rounded-xl border border-lll-border bg-lll-bg-softer px-3 py-2">
                     <p className="text-[11px] text-lll-text-soft">Reservado</p>
-                    <p className="text-lg font-bold">
+                    <p className="text-[clamp(1rem,3.5vw,1.125rem)] font-bold leading-tight">
                       {selected.reserved}
                       {fmtUnit(selected.unit)}
                     </p>

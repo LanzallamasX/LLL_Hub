@@ -43,7 +43,7 @@ function dayBaseClass() {
     "relative rounded-2xl border transition",
     "bg-lll-bg-soft border-lll-border",
     "hover:bg-lll-bg-softer",
-    "p-3 min-h-[118px] w-full", // ✅ más alto
+    "p-2 sm:p-3 min-h-[92px] sm:min-h-[112px] lg:min-h-[118px] w-full",
     "text-left",
   ].join(" ");
 }
@@ -182,9 +182,9 @@ export default function CalendarMonth({
   }
 
   return (
-    <div className="rounded-2xl lg:col-span-2 border border-lll-border bg-lll-bg-soft p-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
+    <div className="rounded-2xl lg:col-span-2 border border-lll-border bg-lll-bg-soft p-3 sm:p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <p className="text-sm font-semibold">{title}</p>
           <p className="text-[12px] text-lll-text-soft">
             {mode === "owner"
@@ -193,21 +193,21 @@ export default function CalendarMonth({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
-            className="px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-sm hover:opacity-90"
+            className="min-h-10 px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-[clamp(0.75rem,2.2vw,0.875rem)] leading-tight hover:opacity-90"
             onClick={onPrevMonth}
             type="button"
           >
             ←
           </button>
 
-          <span className="text-[12px] px-3 py-2 rounded-full border border-lll-border bg-lll-bg-softer text-lll-text-soft">
+          <span className="min-h-10 inline-flex items-center text-[12px] px-3 py-2 rounded-full border border-lll-border bg-lll-bg-softer text-lll-text-soft">
             {monthLabelES(viewMonth)} {viewYear}
           </span>
 
           <button
-            className="px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-sm hover:opacity-90"
+            className="min-h-10 px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-[clamp(0.75rem,2.2vw,0.875rem)] leading-tight hover:opacity-90"
             onClick={onNextMonth}
             type="button"
           >
@@ -215,7 +215,7 @@ export default function CalendarMonth({
           </button>
 
           <button
-            className="px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-sm hover:opacity-90"
+            className="min-h-10 px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-[clamp(0.75rem,2.2vw,0.875rem)] leading-tight hover:opacity-90"
             onClick={onToday}
             type="button"
           >
@@ -224,8 +224,9 @@ export default function CalendarMonth({
         </div>
       </div>
 
-      <div className="mt-4 rounded-2xl border border-lll-border bg-lll-bg-softer p-4">
-        <div className="grid grid-cols-7 gap-3 text-center text-[12px] text-lll-text-soft">
+      <div className="mt-4 overflow-x-auto rounded-2xl border border-lll-border bg-lll-bg-softer p-3 sm:p-4">
+        <div className="min-w-[560px]">
+        <div className="grid grid-cols-7 gap-2 lg:gap-3 text-center text-[12px] text-lll-text-soft">
           {["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"].map((d) => (
             <div key={d} className="py-1">
               {d}
@@ -233,13 +234,13 @@ export default function CalendarMonth({
           ))}
         </div>
 
-        <div className="mt-3 grid grid-cols-7 gap-3">
+        <div className="mt-3 grid grid-cols-7 gap-2 lg:gap-3">
           {daysGrid.map((cell, idx) => {
             if (!cell.date) {
               return (
                 <div
                   key={`empty-${idx}`}
-                  className="min-h-[118px] rounded-2xl border border-transparent"
+                  className="min-h-[92px] sm:min-h-[112px] lg:min-h-[118px] rounded-2xl border border-transparent"
                 />
               );
             }
@@ -284,13 +285,13 @@ export default function CalendarMonth({
                 }}
               >
                 {/* day number */}
-                <div className="absolute top-3 right-3 text-[12px] text-lll-text-soft">
+                <div className="absolute top-2 right-2 sm:top-3 sm:right-3 text-[12px] text-lll-text-soft">
                   {cell.date.getDate()}
                 </div>
 
                 {/* badges */}
                 {total > 0 ? (
-                  <div className="absolute left-3 top-3 flex items-center gap-1.5">
+                  <div className="absolute left-2 top-2 sm:left-3 sm:top-3 flex items-center gap-1.5">
                     <span className="text-[11px] px-2 py-0.5 rounded-full border border-lll-border bg-lll-bg text-lll-text">
                       {total}
                     </span>
@@ -304,7 +305,7 @@ export default function CalendarMonth({
 
                 {/* content */}
                 {total > 0 ? (
-                  <div className="mt-10 pr-2">
+                  <div className="mt-9 sm:mt-10 pr-2">
                     <div className="text-[12px] font-medium text-lll-text truncate">
                       {summaryLine}
                     </div>
@@ -313,12 +314,12 @@ export default function CalendarMonth({
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-10 text-[11px] text-lll-text-soft/40">—</div>
+                  <div className="mt-9 sm:mt-10 text-[11px] text-lll-text-soft/40">—</div>
                 )}
 
                 {/* mini bar */}
                 {total > 0 ? (
-                  <div className="absolute left-3 right-3 bottom-2 h-1.5 rounded-full overflow-hidden border border-lll-border bg-lll-bg">
+                  <div className="absolute left-2 right-2 sm:left-3 sm:right-3 bottom-2 h-1.5 rounded-full overflow-hidden border border-lll-border bg-lll-bg">
                     <div
                       className="h-full bg-amber-500/70"
                       style={{ width: `${Math.round((pendingCount / total) * 100)}%` }}
@@ -353,6 +354,7 @@ export default function CalendarMonth({
               <span>Rechazado</span>
             </div>
           ) : null}
+        </div>
         </div>
       </div>
 

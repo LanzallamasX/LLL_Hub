@@ -24,6 +24,12 @@ import { toVacationInfoForModal } from "@/lib/vacations/adapters";
 
 import { useHolidays } from "@/lib/holidays/useHolidays";
 import { supabase } from "@/lib/supabase/client";
+import {
+  fetchVacationPolicySettings,
+  normalizeVacationPolicyMode,
+  type VacationPolicyMode,
+} from "@/lib/supabase/vacationPolicy";
+import { processPendingEmails } from "@/lib/email/processPendingEmails";
 
 type Filter = "todas" | "pendiente" | "aprobado" | "rechazado";
 
@@ -59,7 +65,37 @@ export default function AbsencesPageClient() {
 
   // ✅ Param global para testear políticas (YYYY-MM-DD)
   const asOfParam = searchParams.get("asOf");
-  const asOfISO = isValidDate(asOfParam) ? asOfParam : null;
+  const vacAtParam = searchParams.get("vacAt");
+  const asOfISO = isValidDate(vacAtParam) ? vacAtParam : isValidDate(asOfParam) ? asOfParam : null;
+  const vacModelParam = (searchParams.get("vacModel") ?? searchParams.get("vacMode") ?? "")
+    .trim()
+    .toLowerCase();
+  const [vacModel, setVacModel] = useState<VacationPolicyMode>("anniversary");
+
+  useEffect(() => {
+    if (!isAuthed) return;
+
+    let alive = true;
+
+    (async () => {
+      if (vacModelParam === "october" || vacModelParam === "anniversary") {
+        setVacModel(normalizeVacationPolicyMode(vacModelParam));
+        return;
+      }
+
+      try {
+        const policy = await fetchVacationPolicySettings();
+        if (alive) setVacModel(policy.policy_mode);
+      } catch (e) {
+        console.error("fetchVacationPolicySettings error", e);
+        if (alive) setVacModel("anniversary");
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [isAuthed, vacModelParam]);
 
   // ✅ Año “simulado” para feriados y cálculos por año
   const year = useMemo(() => yearFromISO(asOfISO), [asOfISO]);
@@ -153,7 +189,18 @@ export default function AbsencesPageClient() {
       // 3) Balance vacaciones (según asOfISO)
       setVacDbLoading(true);
       try {
-        const b = await fetchMyVacationBalance(asOfISO ?? undefined);
+        const b =
+          vacModel === "october"
+            ? await supabase
+                .rpc("get_vacation_balance_october_preview_for_user_at", {
+                  p_user_id: userId,
+                  p_at: asOfISO ?? undefined,
+                })
+                .then(({ data, error }) => {
+                  if (error) throw error;
+                  return data as VacationBalance;
+                })
+            : await fetchMyVacationBalance(asOfISO ?? undefined);
         setVacDb(b);
       } catch {
         setVacDb(null);
@@ -161,7 +208,7 @@ export default function AbsencesPageClient() {
         setVacDbLoading(false);
       }
     },
-    [isAuthed, userId, loadMyAbsences, asOfISO]
+    [isAuthed, userId, loadMyAbsences, asOfISO, vacModel]
   );
 
   // Gate de auth + redirect
@@ -229,10 +276,11 @@ async function handleSubmit(payload: NewAbsencePayload) {
     note: payload.note,
     subtype: payload.subtype ?? null,
     hours: payload.hours ?? null,
+    notifyOwnerIds: payload.notifyOwnerIds ?? [],
   });
 
   // 🚀 DISPARA EMAIL (no bloquea)
-  fetch("/api/process-emails").catch(() => {});
+  await processPendingEmails("absence created");
 
   await refreshAll({ forceAbsences: true });
   closeModal();
@@ -270,7 +318,7 @@ async function handleSubmit(payload: NewAbsencePayload) {
     >
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Mis ausencias</h1>
+          <h1 className="text-[clamp(1.5rem,5vw,1.875rem)] font-semibold leading-tight">Mis ausencias</h1>
           <p className="mt-1 text-sm text-lll-text-soft">
             Creá solicitudes, revisá estados y editá mientras estén pendientes.
           </p>
@@ -287,6 +335,7 @@ async function handleSubmit(payload: NewAbsencePayload) {
           {asOfISO ? (
             <p className="mt-1 text-[12px] text-amber-300">
               Modo test activo: simulando fecha {asOfISO}
+              {vacModel === "october" ? " · preview octubre" : ""}
             </p>
           ) : null}
         </div>

@@ -160,7 +160,7 @@ export default function OwnerDashboardPageClient() {
     <UserLayout mode="owner">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Solicitudes del equipo</h1>
+          <h1 className="text-[clamp(1.5rem,5vw,1.875rem)] font-semibold leading-tight">Solicitudes del equipo</h1>
           <p className="mt-1 text-sm text-lll-text-soft">
             Revisá y gestioná las solicitudes.
           </p>

@@ -74,33 +74,30 @@ export default function VacationBalanceCard() {
       ) : null}
 
       {!loading && summary ? (
-        <div className="mt-4 grid grid-cols-2 lg:grid-cols-5 gap-3">
-          <div className="rounded-2xl border border-lll-border bg-lll-bg p-4">
-            <p className="text-[12px] text-lll-text-soft">Acumuladas</p>
-            <p className="mt-2 text-3xl font-semibold">{fmt(summary.accrued)}</p>
+        <div className="mt-4 grid grid-cols-2 min-[520px]:grid-cols-3 xl:grid-cols-3 gap-3">
+          <div className="min-w-0 rounded-xl border border-lll-border bg-lll-bg p-3">
+            <p className="truncate text-[10px] text-lll-text-soft">Acumuladas</p>
+            <p className="mt-2 text-[clamp(1.5rem,5vw,1.875rem)] font-semibold leading-tight">{fmt(summary.accrued)}</p>
           </div>
 
-          <div className="rounded-2xl border border-lll-border bg-lll-bg p-4">
-            <p className="text-[12px] text-lll-text-soft">Usadas</p>
-            <p className="mt-2 text-3xl font-semibold">{fmt(summary.used)}</p>
-            <p className="mt-1 text-[11px] text-lll-text-soft">Solo pasado (aprobado)</p>
+          <div className="min-w-0 rounded-xl border border-lll-border bg-lll-bg p-3">
+            <p className="truncate text-[10px] text-lll-text-soft">Usadas</p>
+            <p className="mt-2 text-[clamp(1.5rem,5vw,1.875rem)] font-semibold leading-tight">{fmt(summary.used)}</p>
           </div>
 
-          <div className="rounded-2xl border border-lll-border bg-lll-bg p-4">
-            <p className="text-[12px] text-lll-text-soft">Reservadas</p>
-            <p className="mt-2 text-3xl font-semibold">{fmt(summary.reserved)}</p>
-            <p className="mt-1 text-[11px] text-lll-text-soft">Futuro/en curso (aprobado)</p>
+          <div className="min-w-0 rounded-xl border border-lll-border bg-lll-bg p-3">
+            <p className="truncate text-[10px] text-lll-text-soft">Reservadas</p>
+            <p className="mt-2 text-[clamp(1.5rem,5vw,1.875rem)] font-semibold leading-tight">{fmt(summary.reserved)}</p>
           </div>
 
-          <div className="rounded-2xl border border-lll-border bg-lll-bg p-4">
-            <p className="text-[12px] text-lll-text-soft">Pendientes</p>
-            <p className="mt-2 text-3xl font-semibold">{fmt(summary.pending)}</p>
-            <p className="mt-1 text-[11px] text-lll-text-soft">Futuro/en curso</p>
+          <div className="min-w-0 rounded-xl border border-lll-border bg-lll-bg p-3">
+            <p className="truncate text-[10px] text-lll-text-soft">Pendientes</p>
+            <p className="mt-2 text-[clamp(1.5rem,5vw,1.875rem)] font-semibold leading-tight">{fmt(summary.pending)}</p>
           </div>
 
-          <div className="rounded-2xl border border-lll-border bg-lll-bg p-4">
-            <p className="text-[12px] text-lll-text-soft">Disponibles</p>
-            <p className="mt-2 text-3xl font-semibold">{fmt(summary.available)}</p>
+          <div className="min-w-0 rounded-xl border border-lll-border bg-lll-bg p-3">
+            <p className="truncate text-[10px] text-lll-text-soft">Disponibles</p>
+            <p className="mt-2 text-[clamp(1.5rem,5vw,1.875rem)] font-semibold leading-tight">{fmt(summary.available)}</p>
           </div>
         </div>
       ) : null}

@@ -71,6 +71,8 @@ export default function BalanceDonut({
                   background: "rgba(10,10,10,0.85)",
                   color: "white",
                 }}
+                labelStyle={{ color: "white" }}
+                itemStyle={{ color: "white" }}
               />
               <Pie
                 data={data}

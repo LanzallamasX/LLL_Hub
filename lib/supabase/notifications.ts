@@ -78,7 +78,7 @@ export async function listMyNotifications(params?: {
 
 export async function countMyUnreadNotifications(): Promise<number> {
   const { count, error } = await supabase
-    .from("notification_recipients")
+    .from("my_inbox")
     .select("notification_id", { count: "exact", head: true })
     .is("read_at", null);
 

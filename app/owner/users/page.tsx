@@ -533,9 +533,9 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
             </p>
           </div>
 
-          <div className="flex flex-col md:flex-row gap-2 w-full md:w-auto">
+          <div className="flex flex-col md:flex-row md:flex-wrap md:justify-end gap-2 w-full md:w-auto">
             <input
-              className="w-full md:w-[360px] px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm"
+              className="w-full md:w-[min(360px,42vw)] px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm"
               placeholder="Buscar por email, nombre o equipo…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -545,7 +545,7 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
             <button
               type="button"
               onClick={() => setPreAltaOpen((v) => !v)}
-              className="px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-sm text-lll-text-soft hover:text-lll-text"
+              className="min-h-10 px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-[clamp(0.75rem,2.2vw,0.875rem)] leading-tight text-lll-text-soft hover:text-lll-text"
             >
               {preAltaOpen ? "Cerrar pre-alta" : "Nueva pre-alta"}
             </button>
@@ -553,7 +553,7 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
             <button
               onClick={refresh}
               type="button"
-              className="px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-sm text-lll-text-soft hover:text-lll-text"
+              className="min-h-10 px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-[clamp(0.75rem,2.2vw,0.875rem)] leading-tight text-lll-text-soft hover:text-lll-text"
             >
               {busy ? "Actualizando…" : "Actualizar"}
             </button>
@@ -674,9 +674,9 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
       )}
 
       {/* TABLE */}
-      <div className="mt-4 rounded-2xl border border-lll-border bg-lll-bg-soft ">
+      <div className="mt-4 rounded-2xl border border-lll-border bg-lll-bg-soft overflow-hidden">
         {/* Sticky header */}
-        <div className="sticky top-0 z-10 bg-lll-bg-soft/95 backdrop-blur border-b border-lll-border">
+        <div className="sticky top-0 z-10 hidden xl:block bg-lll-bg-soft/95 backdrop-blur border-b border-lll-border">
           <div className="grid grid-cols-12 gap-2 px-4 py-3 text-[12px] text-lll-text-soft">
             <div className="col-span-4">Email</div>
             <div className="col-span-3">Nombre</div>
@@ -709,20 +709,21 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
               return (
                 <div
                   key={row.key}
-                  className="grid grid-cols-12 gap-2 px-4 py-3 text-sm border-b border-lll-border/60 items-center"
+                  className="grid grid-cols-1 gap-3 px-4 py-4 text-sm border-b border-lll-border/60 xl:grid-cols-12 xl:gap-2 xl:py-3 xl:items-center"
                 >
-                  <div className="col-span-4">
-                    <p className="font-medium">{row.email}</p>
+                  <div className="xl:col-span-4 min-w-0">
+                    <p className="font-medium break-words xl:truncate">{row.email}</p>
                     <p className="text-[12px] text-lll-text-soft">
                       {(p?.team ?? row.allow?.team ?? "").trim() || "—"}
                     </p>
                   </div>
 
-                  <div className="col-span-3 text-lll-text-soft">
+                  <div className="xl:col-span-3 min-w-0 text-lll-text-soft">
                     {getRowName(row)}
                   </div>
 
-                  <div className="col-span-2">
+                  <div className="xl:col-span-2">
+                    <p className="mb-1 text-[11px] text-lll-text-soft xl:hidden">Rol</p>
                     {canEditProfile ? (
                       <select
                         value={roleValue}
@@ -739,7 +740,8 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
                     )}
                   </div>
 
-                  <div className="col-span-1">
+                  <div className="xl:col-span-1">
+                    <p className="mb-1 text-[11px] text-lll-text-soft xl:hidden">Activo</p>
                     {canEditProfile ? (
                       <button
                         onClick={() => toggleActive(p!)}
@@ -766,8 +768,8 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
                   </div>
 
                   {/* Estado + acciones compactas */}
-                  <div className="col-span-2 flex justify-end items-center gap-2">
-                    <span className={`px-2 py-1 rounded-lg border text-[12px] ${statusChip.cls}`}>
+                  <div className="xl:col-span-2 flex flex-wrap items-center gap-2 xl:justify-end">
+                    <span className={`shrink-0 px-2 py-1 rounded-lg border text-[12px] ${statusChip.cls}`}>
                       {statusChip.label}
                     </span>
 
@@ -776,7 +778,7 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
                       <button
                         onClick={() => openEdit(p!)}
                         type="button"
-                        className="px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-sm text-lll-text-soft hover:text-lll-text"
+                        className="min-h-10 px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-[clamp(0.75rem,2.2vw,0.875rem)] leading-tight text-lll-text-soft hover:text-lll-text"
                       >
                         Editar
                       </button>
@@ -784,7 +786,7 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
                       <button
                         onClick={() => sendAccess(row.email)}
                         type="button"
-                        className="px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-sm text-lll-text-soft hover:text-lll-text"
+                        className="min-h-10 px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-[clamp(0.75rem,2.2vw,0.875rem)] leading-tight text-lll-text-soft hover:text-lll-text"
                         title="Envía invitación o recovery para que pueda acceder"
                       >
                         Enviar acceso
@@ -793,7 +795,7 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
 
                     {/* Más acciones (compacto) */}
                     <details className="relative">
-                      <summary className="list-none cursor-pointer px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-sm text-lll-text-soft hover:text-lll-text">
+                      <summary className="list-none cursor-pointer min-h-10 px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-[clamp(0.75rem,2.2vw,0.875rem)] leading-tight text-lll-text-soft hover:text-lll-text">
                         Más ▾
                       </summary>
 

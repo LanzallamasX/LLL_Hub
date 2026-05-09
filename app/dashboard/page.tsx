@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import UserLayout from "@/components/layout/UserLayout";
 import NewAbsenceModal, { type NewAbsencePayload } from "@/components/modals/NewAbsenceModal";
@@ -27,11 +27,18 @@ import { toVacationInfoForModal } from "@/lib/vacations/adapters";
 import { useHolidays } from "@/lib/holidays/useHolidays";
 
 import { supabase } from "@/lib/supabase/client";
+import {
+  fetchVacationPolicySettings,
+  normalizeVacationPolicyMode,
+  type VacationPolicyMode,
+} from "@/lib/supabase/vacationPolicy";
+import { processPendingEmails } from "@/lib/email/processPendingEmails";
 
 
 
 export default function DashboardPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editing, setEditing] = useState<Absence | null>(null);
@@ -62,7 +69,42 @@ const { isoSet: holidaysISO } = useHolidays(year);
   // ✅ DB balance (ventana 3 años / FIFO)
  // const { data: vacDb, loading: vacDbLoading } = useMyVacationBalance(isAuthed && !!userId);
   
-  const { data: vacDb, loading: vacDbLoading, reload: reloadVacationBalance, } = useMyVacationBalance(isAuthed && !!userId);
+  const vacAtParam = searchParams.get("vacAt");
+  const vacAtISO = vacAtParam && /^\d{4}-\d{2}-\d{2}$/.test(vacAtParam) ? vacAtParam : null;
+  const vacModelParam = (searchParams.get("vacModel") ?? searchParams.get("vacMode") ?? "")
+    .trim()
+    .toLowerCase();
+  const [vacModel, setVacModel] = useState<VacationPolicyMode>("anniversary");
+
+  useEffect(() => {
+    if (!isAuthed) return;
+
+    let alive = true;
+
+    (async () => {
+      if (vacModelParam === "october" || vacModelParam === "anniversary") {
+        setVacModel(normalizeVacationPolicyMode(vacModelParam));
+        return;
+      }
+
+      try {
+        const policy = await fetchVacationPolicySettings();
+        if (alive) setVacModel(policy.policy_mode);
+      } catch (e) {
+        console.error("fetchVacationPolicySettings error", e);
+        if (alive) setVacModel("anniversary");
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [isAuthed, vacModelParam]);
+
+  const { data: vacDb, loading: vacDbLoading, reload: reloadVacationBalance, } = useMyVacationBalance(
+    isAuthed && !!userId,
+    { pAt: vacAtISO, policyMode: vacModel, userId }
+  );
 
 
 
@@ -250,7 +292,10 @@ const [startDateISO, setStartDateISO] = useState<string | null>(null);
       note: payload.note,
       subtype: payload.subtype ?? null,
       hours: payload.hours ?? null,
+      notifyOwnerIds: payload.notifyOwnerIds ?? [],
     });
+
+    await processPendingEmails("absence created");
 
     await reloadVacationBalance(); 
     closeModal();
@@ -260,7 +305,7 @@ const [startDateISO, setStartDateISO] = useState<string | null>(null);
     <UserLayout mode="user" header={{ title: "Dashboard", subtitle: "Solicitudes, calendario e historial." }}>
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Dashboard</h1>
+          <h1 className="text-[clamp(1.5rem,5vw,1.875rem)] font-semibold leading-tight">Dashboard</h1>
           <p className="mt-1 text-sm text-lll-text-soft">
             Tu vista personal: solicitudes, calendario y historial.
           </p>
@@ -289,7 +334,7 @@ const [startDateISO, setStartDateISO] = useState<string | null>(null);
             <div className="grid grid-cols-2 gap-4">
               <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
                 <p className="text-[12px] text-lll-text-soft">Pendientes</p>
-                <p className="mt-2 text-3xl font-semibold">{myPendingCount}</p>
+                <p className="mt-2 text-[clamp(1.5rem,5vw,1.875rem)] font-semibold leading-tight">{myPendingCount}</p>
                 <p className="mt-1 text-[12px] text-lll-text-soft">A la espera de aprobación.</p>
               </div>
 
@@ -354,6 +399,7 @@ const [startDateISO, setStartDateISO] = useState<string | null>(null);
     ignoreAbsenceId={editing?.id ?? null}
   holidaysISO={holidaysISO}
       startDateISO={startDateISO}
+      asOfISO={vacAtISO}
 
 
 />

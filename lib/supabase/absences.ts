@@ -2,6 +2,7 @@
 import { supabase } from "@/lib/supabase/client";
 import type { AbsenceTypeId } from "@/lib/absenceTypes";
 import type { DeductionPayload } from "@/lib/absenceDeductions";
+import { processPendingEmails } from "@/lib/email/processPendingEmails";
 import type { LicenseSubtype } from "@/lib/absencePolicies"; // ✅ NUEVO
 
 export type AbsenceStatus = "pendiente" | "aprobado" | "rechazado";
@@ -39,6 +40,7 @@ export type AbsenceRow = {
   // ✅ tipado fuerte
   subtype?: LicenseSubtype | null;
   hours?: number | null;
+  notifyOwnerIds?: string[];
 };
 
 // Tu modelo “frontend”
@@ -61,6 +63,7 @@ export type Absence = {
   // ✅ tipado fuerte
   subtype?: LicenseSubtype | null;
   hours?: number | null;
+  notifyOwnerIds?: string[];
 };
 
 export type CreateAbsenceInput = {
@@ -74,6 +77,7 @@ export type CreateAbsenceInput = {
   // ✅ tipado fuerte
   subtype?: LicenseSubtype | null;
   hours?: number | null;
+  notifyOwnerIds?: string[];
 };
 
 export type UpdateAbsenceInput = {
@@ -136,7 +140,7 @@ export async function listAllAbsencesForOwner(): Promise<Absence[]> {
 }
 
 export async function createAbsence(input: CreateAbsenceInput): Promise<Absence> {
-  const payload = {
+  const payload: Record<string, any> = {
     user_id: input.userId,
     user_name: input.userName,
     type: input.type,
@@ -147,6 +151,10 @@ export async function createAbsence(input: CreateAbsenceInput): Promise<Absence>
     subtype: input.subtype ?? null,
     hours: input.hours ?? null,
   };
+
+  if (input.notifyOwnerIds?.length) {
+    payload.notify_owner_ids = input.notifyOwnerIds;
+  }
 
   const { data, error } = await supabase
     .from("absences")
@@ -189,9 +197,15 @@ export async function updateAbsenceStatus(
   id: string,
   status: AbsenceStatus
 ): Promise<Absence> {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  if (!token) throw new Error("No session token");
+
   const res = await fetch("/api/absences/approve", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify({ id, status }),
   });
 
@@ -202,6 +216,8 @@ export async function updateAbsenceStatus(
   }
 
   const { absence } = await res.json();
+  await processPendingEmails(`absence ${status}`);
+
   return mapRowToAbsence(absence);
 }
 
@@ -229,10 +245,17 @@ export async function approveAbsence(
   }
 
   // 🔥 SIEMPRE pasás por backend (calendar + consistencia)
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  if (!token) throw new Error("No session token");
+
   const res = await fetch("/api/absences/approve", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
       id,
@@ -249,7 +272,7 @@ export async function approveAbsence(
 
   const { absence } = await res.json();
 
-  fetch("/api/process-emails").catch(() => {});
+  await processPendingEmails("absence approved");
 
   return mapRowToAbsence(absence);
 }

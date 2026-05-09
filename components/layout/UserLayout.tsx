@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import AppHeader from "@/components/ui/AppHeader";
@@ -35,6 +36,7 @@ export default function UserLayout({
 }) {
   const pathname = usePathname();
   const { isLoading, isAuthed, displayName, role } = useAuth();
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   // ✅ El menú no depende del pathname ni del prop, depende del rol real
   const effectiveMode: LayoutMode = role === "owner" ? "owner" : "user";
@@ -52,6 +54,7 @@ export default function UserLayout({
   const dashboardHref = effectiveMode === "owner" ? "/owner/dashboard" : "/dashboard";
   const calendarHref = "/owner/calendar";
   const usersHref = "/owner/users";
+  const ownerVacationPolicyHref = "/owner/vacation-policy";
 
   const myAbsencesHref = "/absences";
   const profileHref = "/profile";
@@ -69,6 +72,8 @@ export default function UserLayout({
 
   const isCalendarActive = effectiveMode === "owner" && pathname.startsWith("/owner/calendar");
   const isUsersActive = effectiveMode === "owner" && pathname.startsWith("/owner/users");
+  const isOwnerVacationPolicyActive =
+    effectiveMode === "owner" && pathname.startsWith("/owner/vacation-policy");
 
   // ✅ ahora aplica para ambos roles (user + owner)
   const isMyAbsencesActive = pathname === "/absences" || pathname.startsWith("/absences");
@@ -166,6 +171,15 @@ export default function UserLayout({
             <span className="w-2 h-2 rounded bg-lll-accent-alt" />
             Configuración
           </Link>
+          {effectiveMode === "owner" ? (
+            <Link
+              href={ownerVacationPolicyHref}
+              className={navLinkClass(isOwnerVacationPolicyActive)}
+            >
+              <span className="w-2 h-2 rounded bg-amber-400" />
+              Politica de vacaciones
+            </Link>
+          ) : null}
         </nav>
 
         {/* Bottom user */}
@@ -183,12 +197,192 @@ export default function UserLayout({
         </div>
       </aside>
 
+      {mobileOpen ? (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <button
+            type="button"
+            aria-label="Cerrar menu"
+            className="absolute inset-0 bg-black/60"
+            onClick={() => setMobileOpen(false)}
+          />
+
+          <aside className="relative flex h-full w-[min(82vw,320px)] flex-col gap-5 border-r border-lll-border bg-lll-bg-soft px-4 py-5 shadow-2xl">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-9 h-9 shrink-0 rounded-2xl bg-lll-bg-softer border border-lll-border flex items-center justify-center text-xs font-black">
+                  L
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold leading-tight truncate">LANZALLAMAS</p>
+                  <p className="text-[12px] text-lll-text-soft leading-tight">LLL Hub</p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                aria-label="Cerrar menu"
+                onClick={() => setMobileOpen(false)}
+                className="min-h-10 min-w-10 rounded-lg border border-lll-border bg-lll-bg-softer px-3 py-2 text-sm text-lll-text-soft hover:text-lll-text"
+              >
+                X
+              </button>
+            </div>
+
+            <nav className="flex-1 overflow-y-auto text-sm space-y-1">
+              <p className="text-[11px] uppercase tracking-wide text-lll-text-soft/80 mb-2">
+                Principal
+              </p>
+
+              <Link
+                href={dashboardHref}
+                onClick={() => setMobileOpen(false)}
+                className={navLinkClass(isDashboardActive)}
+              >
+                <span className="w-2 h-2 rounded bg-lll-accent" />
+                {effectiveMode === "owner" ? "Solicitudes" : "Dashboard"}
+              </Link>
+
+              {effectiveMode === "owner" ? (
+                <>
+                  <Link
+                    href={myBalancesHref}
+                    onClick={() => setMobileOpen(false)}
+                    className={navLinkClass(isMyBalancesActive)}
+                  >
+                    <span className="w-2 h-2 rounded bg-emerald-400" />
+                    Mis balances
+                  </Link>
+
+                  <Link
+                    href={ownerBalancesEmployeesHref}
+                    onClick={() => setMobileOpen(false)}
+                    className={navLinkClass(isOwnerBalancesEmployeesActive)}
+                  >
+                    <span className="w-2 h-2 rounded bg-sky-400" />
+                    Balance anual por colaborador
+                  </Link>
+                </>
+              ) : (
+                <Link
+                  href={myBalancesHref}
+                  onClick={() => setMobileOpen(false)}
+                  className={navLinkClass(isMyBalancesActive)}
+                >
+                  <span className="w-2 h-2 rounded bg-emerald-400" />
+                  Balance anual
+                </Link>
+              )}
+
+              <Link
+                href={myAbsencesHref}
+                onClick={() => setMobileOpen(false)}
+                className={navLinkClass(isMyAbsencesActive)}
+              >
+                <span className="w-2 h-2 rounded bg-lll-accent-alt" />
+                Mis ausencias
+              </Link>
+
+              {effectiveMode === "owner" ? (
+                <>
+                  <Link
+                    href={calendarHref}
+                    onClick={() => setMobileOpen(false)}
+                    className={navLinkClass(isCalendarActive)}
+                  >
+                    <span className="w-2 h-2 rounded bg-lll-accent" />
+                    Calendario
+                  </Link>
+
+                  <Link
+                    href={usersHref}
+                    onClick={() => setMobileOpen(false)}
+                    className={navLinkClass(isUsersActive)}
+                  >
+                    <span className="w-2 h-2 rounded bg-lll-accent-alt" />
+                    Usuarios
+                  </Link>
+
+
+                </>
+              ) : null}
+
+              <p className="mt-6 text-[11px] uppercase tracking-wide text-lll-text-soft/80 mb-2">
+                Personal
+              </p>
+
+              <Link
+                href={profileHref}
+                onClick={() => setMobileOpen(false)}
+                className={navLinkClass(isProfileActive)}
+              >
+                <span className="w-2 h-2 rounded bg-lll-accent-alt" />
+                Mi perfil
+              </Link>
+
+              <Link
+                href={settingsHref}
+                onClick={() => setMobileOpen(false)}
+                className={navLinkClass(isSettingsActive)}
+              >
+                <span className="w-2 h-2 rounded bg-lll-accent-alt" />
+                Configuracion
+              </Link>
+
+              {effectiveMode === "owner" ? (
+                <Link
+                  href={ownerVacationPolicyHref}
+                  onClick={() => setMobileOpen(false)}
+                  className={navLinkClass(isOwnerVacationPolicyActive)}
+                >
+                  <span className="w-2 h-2 rounded bg-amber-400" />
+                  Politica de vacaciones
+                </Link>
+              ) : null}
+
+            </nav>
+
+            <div className="mt-auto flex items-center justify-between gap-3 border-t border-lll-border pt-4">
+              <div className="min-w-0">
+                <p className="text-sm font-medium truncate">{name}</p>
+                <p className="text-[12px] text-lll-text-soft capitalize">
+                  {isAuthed ? role : "no-auth"}
+                </p>
+              </div>
+
+              <div className="w-9 h-9 shrink-0 rounded-full bg-lll-bg-softer border border-lll-border flex items-center justify-center text-xs font-semibold">
+                {initials}
+              </div>
+            </div>
+          </aside>
+        </div>
+      ) : null}
+
       {/* CONTENT */}
       <div className="flex-1 flex flex-col">
         {/* Topbar */}
         <header className="border-b border-lll-border bg-lll-bg-soft">
           <div className="px-4 py-3 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
+              <button
+                type="button"
+                aria-label="Abrir menu"
+                onClick={() => setMobileOpen(true)}
+                className="md:hidden min-h-10 min-w-10 rounded-lg border border-lll-border bg-lll-bg-softer px-3 py-2 text-lll-text-soft hover:text-lll-text"
+              >
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  className="h-4 w-4"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                >
+                  <path d="M4 7h16" />
+                  <path d="M4 12h16" />
+                  <path d="M4 17h16" />
+                </svg>
+              </button>
               <p className="text-sm text-lll-text-soft whitespace-nowrap">LLL HUB</p>
               <span className="text-lll-text-soft/60">·</span>
               <p className="text-sm truncate">{header?.title ?? "LLL Hub"}</p>

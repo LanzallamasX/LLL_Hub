@@ -22,6 +22,7 @@ import { findOverlappingAbsence } from "@/lib/absences/overlap";
 
 import DateRangePickerLLL, { type BlockedRange } from "@/components/ui/DateRangePickerLLL";
 import { countChargeableDays } from "@/lib/vacations/dateCount";
+import { listActiveOwners, type OwnerOption } from "@/lib/supabase/owners";
 
 export type NewAbsencePayload = {
   from: string;
@@ -31,6 +32,7 @@ export type NewAbsencePayload = {
 
   subtype?: LicenseSubtype | null;
   hours?: number | null;
+  notifyOwnerIds?: string[];
 };
 
 type Usage = { used: number; unit: PolicyUnit };
@@ -206,10 +208,15 @@ export default function NewAbsenceModal({
 
   const [submitError, setSubmitError] = useState<string>("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [ownerOptions, setOwnerOptions] = useState<OwnerOption[]>([]);
+  const [selectedOwnerIds, setSelectedOwnerIds] = useState<string[]>(initial?.notifyOwnerIds ?? []);
+  const [ownersLoading, setOwnersLoading] = useState(false);
+  const [ownersLoadError, setOwnersLoadError] = useState(false);
 
   const typeDef = useMemo(() => getAbsenceType(type), [type]);
   const isVacation = type === "vacaciones";
   const isLicense = type === "licencia";
+  const showNotificationSelector = !ignoreAbsenceId;
 
   const policy = useMemo(() => {
     if (isLicense) {
@@ -330,6 +337,12 @@ export default function NewAbsenceModal({
     return Boolean(subtype);
   }, [isLicense, subtype]);
 
+  const notificationRecipientsOk = useMemo(() => {
+    if (!showNotificationSelector) return true;
+    if (ownersLoading || ownersLoadError) return false;
+    return selectedOwnerIds.length > 0;
+  }, [showNotificationSelector, ownersLoading, ownersLoadError, selectedOwnerIds.length]);
+
   const canSubmit = useMemo(() => {
     if (isSubmitting) return false;
     if (!dateRangeOk) return false;
@@ -338,6 +351,7 @@ export default function NewAbsenceModal({
     if (!licenseSubtypeOk) return false;
     if (!hoursOk) return false;
     if (!isVacation && exceedsPolicyAvailable) return false;
+    if (!notificationRecipientsOk) return false;
     return true;
   }, [
     isSubmitting,
@@ -348,6 +362,7 @@ export default function NewAbsenceModal({
     licenseSubtypeOk,
     hoursOk,
     exceedsPolicyAvailable,
+    notificationRecipientsOk,
   ]);
 
   useEffect(() => {
@@ -359,10 +374,48 @@ export default function NewAbsenceModal({
     setNote(initial?.note ?? "");
     setSubtype((initial?.subtype as LicenseSubtype | null | undefined) ?? "");
     setHours(initial?.hours != null && Number.isFinite(Number(initial?.hours)) ? String(initial?.hours) : "");
+    setSelectedOwnerIds(initial?.notifyOwnerIds ?? []);
 
     setSubmitError("");
     setIsSubmitting(false);
-  }, [open, initial?.from, initial?.to, initial?.type, initial?.note, initial?.subtype, initial?.hours]);
+  }, [
+    open,
+    initial?.from,
+    initial?.to,
+    initial?.type,
+    initial?.note,
+    initial?.subtype,
+    initial?.hours,
+    initial?.notifyOwnerIds,
+  ]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (!showNotificationSelector) return;
+
+    let alive = true;
+    setOwnersLoading(true);
+    setOwnersLoadError(false);
+
+    listActiveOwners()
+      .then((owners) => {
+        if (alive) setOwnerOptions(owners);
+      })
+      .catch((err) => {
+        console.warn("listActiveOwners warning", err);
+        if (alive) {
+          setOwnerOptions([]);
+          setOwnersLoadError(true);
+        }
+      })
+      .finally(() => {
+        if (alive) setOwnersLoading(false);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [open, showNotificationSelector]);
 
   useEffect(() => {
     if (!open) return;
@@ -385,6 +438,12 @@ export default function NewAbsenceModal({
     return annualEntitlementByYears(tenure.years);
   }, [tenure]);
 
+  function toggleOwner(ownerId: string) {
+    setSelectedOwnerIds((current) =>
+      current.includes(ownerId) ? current.filter((id) => id !== ownerId) : [...current, ownerId]
+    );
+  }
+
   async function handleSubmit() {
     if (!canSubmit) return;
 
@@ -398,6 +457,7 @@ export default function NewAbsenceModal({
       note: note.trim() ? note.trim() : undefined,
       subtype: isLicense ? (subtype ? subtype : null) : null,
       hours: isHourUnit ? Number(hours) : null,
+      notifyOwnerIds: selectedOwnerIds,
     };
 
     try {
@@ -413,7 +473,7 @@ export default function NewAbsenceModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-label={title}
@@ -426,10 +486,10 @@ export default function NewAbsenceModal({
       />
 
       <div
-        className="relative w-full max-w-4xl rounded-2xl border border-lll-border bg-lll-bg-soft shadow-2xl"
+        className="relative my-4 flex w-full max-w-4xl max-h-[calc(100dvh-2rem)] flex-col overflow-hidden rounded-2xl border border-lll-border bg-lll-bg-soft shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-5 py-4 border-b border-lll-border flex items-start justify-between gap-4">
+        <div className="shrink-0 px-4 py-3 sm:px-5 sm:py-4 border-b border-lll-border flex items-start justify-between gap-4">
           <div className="min-w-0">
             <p className="text-base font-semibold leading-6">{title}</p>
             <p className="mt-0.5 text-[13px] text-lll-text-soft">{subtitle}</p>
@@ -460,7 +520,7 @@ export default function NewAbsenceModal({
           </button>
         </div>
 
-        <div className="p-5">
+        <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
           <div className="mb-4">
             {isVacation ? (
               vacationInfo ? (
@@ -548,7 +608,7 @@ export default function NewAbsenceModal({
             ) : null}
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <div className="space-y-4">
               <div className="rounded-2xl border border-lll-border bg-lll-bg-softer p-4">
                 <label className="text-[12px] text-lll-text-soft">Tipo</label>
@@ -663,7 +723,7 @@ export default function NewAbsenceModal({
               <div className="rounded-2xl border border-lll-border bg-lll-bg-softer p-4">
                 <label className="text-[12px] text-lll-text-soft">Comentario</label>
                 <textarea
-                  className="mt-2 w-full px-3 py-2 rounded-lg bg-lll-bg-soft border border-lll-border outline-none min-h-[220px] resize-none"
+                  className="mt-2 w-full px-3 py-2 rounded-lg bg-lll-bg-soft border border-lll-border outline-none min-h-[120px] lg:min-h-[160px] xl:min-h-[220px] resize-y"
                   placeholder="Opcional..."
                   value={note}
                   onChange={(e) => {
@@ -674,15 +734,73 @@ export default function NewAbsenceModal({
                 <p className="mt-2 text-[12px] text-lll-text-soft">Tip: agregá contexto si necesitás aprobación rápida.</p>
               </div>
 
-              <div className="rounded-2xl border border-lll-border bg-lll-bg-softer p-4 flex items-center justify-between gap-3">
+              {showNotificationSelector ? (
+              <div className="rounded-2xl border border-lll-border bg-lll-bg-softer p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <label className="text-[12px] text-lll-text-soft">Notificar a</label>
+                  {selectedOwnerIds.length > 0 ? (
+                    <button
+                      type="button"
+                      className="text-[12px] text-lll-text-soft hover:text-lll-text"
+                      onClick={() => setSelectedOwnerIds([])}
+                      disabled={isSubmitting}
+                    >
+                      Todos
+                    </button>
+                  ) : null}
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {ownersLoading ? (
+                    <span className="text-[12px] text-lll-text-soft">Cargando...</span>
+                  ) : ownersLoadError ? (
+                    <span className="text-[12px] text-amber-300">No se pudieron cargar owners.</span>
+                  ) : ownerOptions.length === 0 ? (
+                    <span className="text-[12px] text-lll-text-soft">Todos los owners activos</span>
+                  ) : (
+                    ownerOptions.map((owner) => {
+                      const selected = selectedOwnerIds.includes(owner.id);
+                      const label = owner.fullName || owner.email || "Owner";
+
+                      return (
+                        <button
+                          key={owner.id}
+                          type="button"
+                          onClick={() => toggleOwner(owner.id)}
+                          disabled={isSubmitting}
+                          className={`rounded-full border px-3 py-1.5 text-[12px] transition ${
+                            selected
+                              ? "border-lll-accent bg-lll-accent text-black"
+                              : "border-lll-border bg-lll-bg-soft text-lll-text-soft hover:text-lll-text"
+                          }`}
+                          title={owner.email ?? label}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+
+                <p className="mt-2 text-[12px] text-lll-text-soft">
+                  {ownersLoadError
+                    ? "No se puede enviar hasta cargar owners"
+                    : selectedOwnerIds.length > 0
+                    ? `${selectedOwnerIds.length} owner(s) seleccionado(s)`
+                    : "Selecciona al menos un owner para enviar"}
+                </p>
+              </div>
+              ) : null}
+
+              <div className="rounded-2xl border border-lll-border bg-lll-bg-softer p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="text-[12px] text-lll-text-soft">
                   {typeDef && typeDef.requiresApproval === false ? "Este tipo no requiere aprobación." : " "}
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
                   <button
                     onClick={onClose}
-                    className="px-4 py-2 rounded-lg border border-lll-border bg-lll-bg-soft text-lll-text"
+                    className="w-full sm:w-auto px-4 py-2 rounded-lg border border-lll-border bg-lll-bg-soft text-lll-text"
                     type="button"
                     disabled={isSubmitting}
                   >
@@ -692,7 +810,7 @@ export default function NewAbsenceModal({
                   <button
                     onClick={handleSubmit}
                     disabled={!canSubmit}
-                    className={`px-4 py-2 rounded-lg font-semibold ${
+                    className={`w-full sm:w-auto px-4 py-2 rounded-lg font-semibold ${
                       canSubmit
                         ? "bg-lll-accent text-black"
                         : "bg-lll-bg-soft text-lll-text-soft border border-lll-border cursor-not-allowed"
@@ -736,7 +854,6 @@ export default function NewAbsenceModal({
           </div>
         </div>
 
-        <div className="h-4" />
       </div>
     </div>
   );
