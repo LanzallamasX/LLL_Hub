@@ -4,7 +4,7 @@ import React, { useMemo } from "react";
 import type { BalanceKey } from "@/lib/absencePolicies";
 import { POLICIES } from "@/lib/absencePolicies";
 
-type Usage = { used: number; unit: "day" | "hour" };
+type Usage = { used: number; reserved?: number; unit: "day" | "hour" };
 
 type BalanceItem = {
   key: BalanceKey;
@@ -12,6 +12,7 @@ type BalanceItem = {
   unit: "day" | "hour";
   allowance: number; // cupo
   used: number; // usado
+  reserved: number; // reservado
   available: number; // disponible
   pct: number; // 0..100
   tone: "ok" | "warn" | "danger";
@@ -89,9 +90,10 @@ export default function BalancesSummary({
     if (!hideKeys.includes("VACATION_DAYS")) {
       if (typeof vacationAvailable === "number") {
         const used = usageByKey.get("VACATION_DAYS")?.used ?? 0;
-        const allowance = typeof vacationAllowance === "number" ? vacationAllowance : Math.max(used + vacationAvailable, 0);
+        const reserved = usageByKey.get("VACATION_DAYS")?.reserved ?? 0;
+        const allowance = typeof vacationAllowance === "number" ? vacationAllowance : Math.max(used + reserved + vacationAvailable, 0);
         const available = vacationAvailable;
-        const pct = allowance > 0 ? (used / allowance) * 100 : 0;
+        const pct = allowance > 0 ? ((used + reserved) / allowance) * 100 : 0;
         const tone: BalanceItem["tone"] = pct >= 90 ? "danger" : pct >= 75 ? "warn" : "ok";
 
         res.push({
@@ -100,6 +102,7 @@ export default function BalancesSummary({
           unit: "day",
           allowance,
           used,
+          reserved,
           available,
           pct: clamp(pct, 0, 100),
           tone,
@@ -125,9 +128,10 @@ export default function BalancesSummary({
       if (meta.allowance == null) continue; // si no hay cupo, no mostramos tarjeta en este resumen
 
       const used = usageByKey.get(key)?.used ?? 0;
+      const reserved = usageByKey.get(key)?.reserved ?? 0;
       const allowance = meta.allowance;
-      const available = Math.max(0, allowance - used);
-      const pct = allowance > 0 ? (used / allowance) * 100 : 0;
+      const available = Math.max(0, allowance - used - reserved);
+      const pct = allowance > 0 ? ((used + reserved) / allowance) * 100 : 0;
       const tone: BalanceItem["tone"] = pct >= 90 ? "danger" : pct >= 75 ? "warn" : "ok";
 
       res.push({
@@ -136,6 +140,7 @@ export default function BalancesSummary({
         unit: meta.unit,
         allowance,
         used,
+        reserved,
         available,
         pct: clamp(pct, 0, 100),
         tone,
@@ -207,6 +212,11 @@ export default function BalancesSummary({
                 <span>
                   Usado: <span className="text-lll-text">{it.used}</span> {unitLabel(it.unit, it.used)}
                 </span>
+                {it.reserved > 0 ? (
+                  <span>
+                    Reservado: <span className="text-lll-text">{it.reserved}</span> {unitLabel(it.unit, it.reserved)}
+                  </span>
+                ) : null}
               </div>
 
               {it.tone !== "ok" && (

@@ -35,7 +35,7 @@ export type NewAbsencePayload = {
   notifyOwnerIds?: string[];
 };
 
-type Usage = { used: number; unit: PolicyUnit };
+type Usage = { used: number; reserved?: number; unit: PolicyUnit };
 
 export type VacationInfo = {
   // compat: mantenemos nombres, pero ahora:
@@ -279,10 +279,11 @@ export default function NewAbsenceModal({
     if (!policy?.deducts || !policy.deductsFrom) return null;
 
     const used = usageByKey?.get(policy.deductsFrom)?.used ?? 0;
+    const reserved = usageByKey?.get(policy.deductsFrom)?.reserved ?? 0;
     const allowance = policy.allowance;
-    const available = allowance == null ? null : Math.max(0, allowance - used);
+    const available = allowance == null ? null : Math.max(0, allowance - used - reserved);
 
-    return { balanceKey: policy.deductsFrom, unit: policy.unit, allowance, used, available };
+    return { balanceKey: policy.deductsFrom, unit: policy.unit, allowance, used, reserved, available };
   }, [policy, usageByKey]);
 
   const exceedsPolicyAvailable = useMemo(() => {
@@ -599,6 +600,10 @@ export default function NewAbsenceModal({
                       <Sep />
                       <span>
                         Usado: {usage.used} {usage.unit === "hour" ? "h" : "d"}
+                      </span>
+                      <Sep />
+                      <span>
+                        Reservado: {usage.reserved} {usage.unit === "hour" ? "h" : "d"}
                       </span>
                     </>
                   }

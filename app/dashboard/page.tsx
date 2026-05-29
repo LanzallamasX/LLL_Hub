@@ -166,8 +166,8 @@ const { isoSet: holidaysISO } = useHolidays(year);
 
   const usageByKey = useMemo(() => {
     const y = new Date().getFullYear();
-    return computeUsageByBalanceKey(myAbsences, y);
-  }, [myAbsences]);
+    return computeUsageByBalanceKey(myAbsences, y, { asOfISO: vacAtISO ?? undefined });
+  }, [myAbsences, vacAtISO]);
 
   // ✅ Modal: Cupo (bucket actual) + Acum (remaining buckets previos) + Usado/Disponible (ventana)
 const vacationInfoForModal = useMemo(() => {

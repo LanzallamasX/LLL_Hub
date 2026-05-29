@@ -202,6 +202,8 @@ export default function BalancesPage() {
     return toISODate(endOfMonth(year, month0));
   }, [vacAtFromUrl, year, month0]);
 
+  const balanceAsOfISO = useMemo(() => vacAtFromUrl ?? toISODate(new Date()), [vacAtFromUrl]);
+
   // ✅ balance vacaciones REAL (RPC) para que respete migración + acumulado
   const [vacRpc, setVacRpc] = useState<{
     granted: number;
@@ -243,13 +245,12 @@ export default function BalancesPage() {
   }, [isAuthed, userId, periodAtISO, vacModel]);
 
   const statsMap = useMemo(() => {
-    const scopedAbsences =
-      month0 === "toDate" ? clampAbsencesThrough(myAbsences, periodAtISO) : myAbsences;
+    const scopedAbsences = myAbsences;
     const map = computeBalanceStatsByKey(
       scopedAbsences,
       year,
       typeof month0 === "number" ? month0 : undefined,
-      { asOfISO: periodAtISO }
+      { asOfISO: balanceAsOfISO }
     );
 
     // ✅ reemplaza cálculo local por RPC (migración + acumulado)
@@ -265,7 +266,7 @@ export default function BalancesPage() {
     }
 
     return map;
-  }, [myAbsences, year, month0, periodAtISO, vacRpc]);
+  }, [myAbsences, year, month0, balanceAsOfISO, vacRpc]);
 
   const breakdownCatalog = useMemo(() => {
     const rows = POLICIES.filter((p) => p.deducts && p.deductsFrom).map((p) => ({

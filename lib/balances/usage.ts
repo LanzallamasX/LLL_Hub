@@ -6,6 +6,7 @@ import { clampRangeToYear, countChargeableDays } from "@/lib/vacations/dateCount
 
 export type Usage = {
   used: number;
+  reserved: number;
   unit: PolicyUnit;
 };
 
@@ -14,6 +15,14 @@ function isoYearStart(year: number) {
 }
 function isoYearEnd(year: number) {
   return `${year}-12-31`;
+}
+
+function todayISO() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function overlapsYear(fromISO: string, toISO: string, year: number) {
@@ -32,17 +41,23 @@ function daysBetweenInclusive(fromISO: string, toISO: string) {
 /**
  * MVP:
  * - Suma consumo por BalanceKey en el año indicado
- * - Cuenta SOLO ausencias aprobadas
+ * - Cuenta aprobadas pasadas como usado
+ * - Cuenta pendientes y aprobadas futuras/en curso como reservado
  * - Usa buildDeductionFromAbsence para decidir qué descuenta y cuánto
  *
  * Fix:
  * - Si el rango cruza de año, prorratea solo la parte dentro del año.
  */
-export function computeUsageByBalanceKey(absences: Absence[], year: number): Map<BalanceKey, Usage> {
+export function computeUsageByBalanceKey(
+  absences: Absence[],
+  year: number,
+  opts?: { asOfISO?: string }
+): Map<BalanceKey, Usage> {
   const map = new Map<BalanceKey, Usage>();
+  const asOfISO = opts?.asOfISO ?? todayISO();
 
   for (const a of absences) {
-    if (a.status !== "aprobado") continue;
+    if (a.status !== "aprobado" && a.status !== "pendiente") continue;
 
     const d = buildDeductionFromAbsence(a);
     if (!d) continue;
@@ -72,12 +87,13 @@ export function computeUsageByBalanceKey(absences: Absence[], year: number): Map
           : daysBetweenInclusive(clamped.fromISO, clamped.toISO);
     }
 
-    const prev = map.get(d.balanceKey);
-    if (!prev) {
-      map.set(d.balanceKey, { used: amount, unit: d.unit });
-    } else {
-      map.set(d.balanceKey, { used: prev.used + amount, unit: d.unit });
-    }
+    const prev = map.get(d.balanceKey) ?? { used: 0, reserved: 0, unit: d.unit };
+    const next =
+      a.status === "pendiente" || a.to >= asOfISO
+        ? { ...prev, reserved: prev.reserved + amount }
+        : { ...prev, used: prev.used + amount };
+
+    map.set(d.balanceKey, next);
   }
 
   return map;
