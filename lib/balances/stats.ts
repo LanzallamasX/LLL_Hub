@@ -23,26 +23,6 @@ function daysBetweenInclusive(fromISO: string, toISO: string) {
   return Math.max(1, days);
 }
 
-function overlapsMonth(a: Absence, year: number, month0: number) {
-  const start = new Date(year, month0, 1).getTime();
-  const end = new Date(year, month0 + 1, 1).getTime(); // exclusive
-
-  const from = new Date(a.from + "T00:00:00").getTime();
-  const to = new Date(a.to + "T00:00:00").getTime() + 86400000; // inclusive -> exclusive
-
-  return from < end && to > start;
-}
-
-function overlapsYear(a: Absence, year: number) {
-  const start = new Date(year, 0, 1).getTime();
-  const end = new Date(year + 1, 0, 1).getTime(); // exclusive
-
-  const from = new Date(a.from + "T00:00:00").getTime();
-  const to = new Date(a.to + "T00:00:00").getTime() + 86400000; // inclusive -> exclusive
-
-  return from < end && to > start;
-}
-
 function periodBounds(year: number, month0?: number) {
   if (month0 == null) {
     return { fromISO: `${year}-01-01`, toISO: `${year}-12-31` };
@@ -56,6 +36,38 @@ function periodBounds(year: number, month0?: number) {
     fromISO: `${from.getFullYear()}-${pad(from.getMonth() + 1)}-${pad(from.getDate())}`,
     toISO: `${to.getFullYear()}-${pad(to.getMonth() + 1)}-${pad(to.getDate())}`,
   };
+}
+
+function cycleBoundsForDate(atISO: string, startMonth: number) {
+  const y = Number(atISO.slice(0, 4));
+  const m = Number(atISO.slice(5, 7));
+  const safeStartMonth = Math.max(1, Math.min(12, startMonth || 1));
+  const startYear = m >= safeStartMonth ? y : y - 1;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const end = new Date(startYear + 1, safeStartMonth - 1, 0);
+
+  return {
+    fromISO: `${startYear}-${pad(safeStartMonth)}-01`,
+    toISO: `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`,
+  };
+}
+
+function boundsForBalanceKey(
+  balanceKey: BalanceKey,
+  year: number,
+  month0: number | undefined,
+  asOfISO: string,
+  opts?: { homeOfficeCycleStartMonth?: number }
+) {
+  if (
+    month0 == null &&
+    balanceKey === "HOME_OFFICE_DAYS" &&
+    opts?.homeOfficeCycleStartMonth
+  ) {
+    return cycleBoundsForDate(asOfISO, opts.homeOfficeCycleStartMonth);
+  }
+
+  return periodBounds(year, month0);
 }
 
 function clampRange(fromISO: string, toISO: string, minISO: string, maxISO: string) {
@@ -103,6 +115,7 @@ export function computeBalanceStatsByKey(
   opts?: {
     vacationDb?: VacationBalance | null;
     asOfISO?: string;
+    homeOfficeCycleStartMonth?: number;
   }
 ): Map<BalanceKey, BalanceStats> {
   const map = new Map<BalanceKey, BalanceStats>();
@@ -154,8 +167,7 @@ export function computeBalanceStatsByKey(
   // 3) Movimientos (aprobado + pendiente) para NO-vacaciones (si no hay vacDb)
   const relevant = absences.filter((a) => {
     if (a.status !== "aprobado" && a.status !== "pendiente") return false;
-    if (month0 == null) return overlapsYear(a, year);
-    return overlapsMonth(a, year, month0);
+    return true;
   });
 
   for (const a of relevant) {
@@ -172,7 +184,7 @@ export function computeBalanceStatsByKey(
     const entry = map.get(policy.deductsFrom);
     if (!entry) continue;
 
-    const bounds = periodBounds(year, month0);
+    const bounds = boundsForBalanceKey(policy.deductsFrom, year, month0, asOfISO, opts);
     const range = clampRange(a.from, a.to, bounds.fromISO, bounds.toISO);
     if (!range) continue;
 
@@ -210,11 +222,19 @@ export type HistoryRow = {
   note?: string | null;
 };
 
-export function buildHistoryRows(absences: Absence[], year: number, month0?: number): HistoryRow[] {
+export function buildHistoryRows(
+  absences: Absence[],
+  year: number,
+  month0?: number,
+  opts?: {
+    asOfISO?: string;
+    homeOfficeCycleStartMonth?: number;
+  }
+): HistoryRow[] {
+  const asOfISO = opts?.asOfISO ?? new Date().toISOString().slice(0, 10);
   const relevant = absences.filter((a) => {
     if (a.status !== "aprobado" && a.status !== "pendiente") return false;
-    if (month0 == null) return overlapsYear(a, year);
-    return overlapsMonth(a, year, month0);
+    return true;
   });
 
   const rows: HistoryRow[] = [];
@@ -227,7 +247,7 @@ export function buildHistoryRows(absences: Absence[], year: number, month0?: num
 
     if (!policy?.deducts || !policy.deductsFrom) continue;
 
-    const bounds = periodBounds(year, month0);
+    const bounds = boundsForBalanceKey(policy.deductsFrom, year, month0, asOfISO, opts);
     const range = clampRange(a.from, a.to, bounds.fromISO, bounds.toISO);
     if (!range) continue;
 

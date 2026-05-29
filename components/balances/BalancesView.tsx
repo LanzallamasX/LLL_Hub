@@ -288,7 +288,10 @@ export default function BalancesView({
       scopedAbsences,
       year,
       typeof month0 === "number" ? month0 : undefined,
-      { asOfISO: balanceAsOfISO }
+      {
+        asOfISO: balanceAsOfISO,
+        homeOfficeCycleStartMonth: vacModel === "october" ? 10 : undefined,
+      }
     );
 
     // ✅ Vacaciones: el gráfico usa el acumulado real (granted)
@@ -304,7 +307,7 @@ export default function BalancesView({
     }
 
     return map;
-  }, [myAbsences, year, month0, balanceAsOfISO, vacRpc]);
+  }, [myAbsences, year, month0, balanceAsOfISO, vacModel, vacRpc]);
 
   const breakdownCatalog = useMemo(() => {
     const rows = POLICIES.filter((p) => p.deducts && p.deductsFrom).map((p) => ({
@@ -364,9 +367,13 @@ export default function BalancesView({
     return buildHistoryRows(
       scopedAbsences,
       year,
-      typeof month0 === "number" ? month0 : undefined
+      typeof month0 === "number" ? month0 : undefined,
+      {
+        asOfISO: periodAtISO,
+        homeOfficeCycleStartMonth: vacModel === "october" ? 10 : undefined,
+      }
     );
-  }, [myAbsences, year, month0, periodAtISO]);
+  }, [myAbsences, year, month0, periodAtISO, vacModel]);
 
   const exportRows = useMemo(() => {
     return history.map((r) => ({

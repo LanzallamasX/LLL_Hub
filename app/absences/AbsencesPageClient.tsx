@@ -144,8 +144,11 @@ export default function AbsencesPageClient() {
 
   // ✅ ausencias usadas (si tu helper usa “año”, lo hacemos con el año simulado)
   const usageByKey = useMemo(() => {
-    return computeUsageByBalanceKey(myAbsences, year, { asOfISO: asOfISO ?? undefined });
-  }, [myAbsences, year, asOfISO]);
+    return computeUsageByBalanceKey(myAbsences, year, {
+      asOfISO: asOfISO ?? undefined,
+      homeOfficeCycleStartMonth: vacModel === "october" ? 10 : undefined,
+    });
+  }, [myAbsences, year, asOfISO, vacModel]);
 
   // ✅ MISMO criterio que Dashboard, sin duplicación
   const vacationInfoForModal = useMemo(() => {

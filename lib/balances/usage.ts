@@ -17,6 +17,20 @@ function isoYearEnd(year: number) {
   return `${year}-12-31`;
 }
 
+function cycleBoundsForDate(atISO: string, startMonth: number) {
+  const y = Number(atISO.slice(0, 4));
+  const m = Number(atISO.slice(5, 7));
+  const safeStartMonth = Math.max(1, Math.min(12, startMonth || 1));
+  const startYear = m >= safeStartMonth ? y : y - 1;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const end = new Date(startYear + 1, safeStartMonth - 1, 0);
+
+  return {
+    fromISO: `${startYear}-${pad(safeStartMonth)}-01`,
+    toISO: `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`,
+  };
+}
+
 function todayISO() {
   const d = new Date();
   const y = d.getFullYear();
@@ -29,6 +43,17 @@ function overlapsYear(fromISO: string, toISO: string, year: number) {
   const yStart = isoYearStart(year);
   const yEnd = isoYearEnd(year);
   return fromISO <= yEnd && toISO >= yStart;
+}
+
+function overlapsRange(fromISO: string, toISO: string, minISO: string, maxISO: string) {
+  return fromISO <= maxISO && toISO >= minISO;
+}
+
+function clampRange(fromISO: string, toISO: string, minISO: string, maxISO: string) {
+  const from = fromISO > minISO ? fromISO : minISO;
+  const to = toISO < maxISO ? toISO : maxISO;
+  if (to < from) return null;
+  return { fromISO: from, toISO: to };
 }
 
 function daysBetweenInclusive(fromISO: string, toISO: string) {
@@ -51,10 +76,13 @@ function daysBetweenInclusive(fromISO: string, toISO: string) {
 export function computeUsageByBalanceKey(
   absences: Absence[],
   year: number,
-  opts?: { asOfISO?: string }
+  opts?: { asOfISO?: string; homeOfficeCycleStartMonth?: number }
 ): Map<BalanceKey, Usage> {
   const map = new Map<BalanceKey, Usage>();
   const asOfISO = opts?.asOfISO ?? todayISO();
+  const homeOfficeBounds = opts?.homeOfficeCycleStartMonth
+    ? cycleBoundsForDate(asOfISO, opts.homeOfficeCycleStartMonth)
+    : null;
 
   for (const a of absences) {
     if (a.status !== "aprobado" && a.status !== "pendiente") continue;
@@ -72,9 +100,18 @@ export function computeUsageByBalanceKey(
       amount = d.amount;
     } else {
       // day: suma solo el tramo dentro del año
-      if (!overlapsYear(a.from, a.to, year)) continue;
+      const useHomeOfficeCycle = d.balanceKey === "HOME_OFFICE_DAYS" && homeOfficeBounds;
+      if (useHomeOfficeCycle) {
+        if (!overlapsRange(a.from, a.to, homeOfficeBounds.fromISO, homeOfficeBounds.toISO)) {
+          continue;
+        }
+      } else if (!overlapsYear(a.from, a.to, year)) {
+        continue;
+      }
 
-      const clamped = clampRangeToYear(a.from, a.to, year);
+      const clamped = useHomeOfficeCycle
+        ? clampRange(a.from, a.to, homeOfficeBounds.fromISO, homeOfficeBounds.toISO)
+        : clampRangeToYear(a.from, a.to, year);
       if (!clamped) continue;
 
       // OJO: buildDeductionFromAbsence ya decide cómo contar días (vacaciones vs otros)
