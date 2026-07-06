@@ -11,6 +11,7 @@ import { formatAR, formatARDateTime } from "@/lib/date";
 
 
 import { useAbsences } from "@/contexts/AbsencesContext";
+import AbsenceConversation from "@/components/dashboard/AbsenceConversation";
 
 import type { Absence, AbsenceStatus } from "@/lib/supabase/absences";
 
@@ -156,6 +157,8 @@ async function onDelete(a: Absence) {
 
 
               </div>
+
+              <AbsenceConversation absence={a} />
             </div>
           );
         })}

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import UserLayout from "@/components/layout/UserLayout";
+import AbsenceConversation from "@/components/dashboard/AbsenceConversation";
 import { useAbsences } from "@/contexts/AbsencesContext";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -352,6 +353,8 @@ export default function OwnerDashboardPageClient() {
                   )}
                 </div>
               </div>
+
+              <AbsenceConversation absence={a} defaultOpen={focusId === a.id} />
             </div>
           );
         })}
