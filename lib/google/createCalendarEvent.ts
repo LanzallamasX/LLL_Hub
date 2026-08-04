@@ -1,12 +1,20 @@
 import { google } from "googleapis";
 import { createClient } from "@supabase/supabase-js";
 
+function addOneDayISO(isoDate: string) {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
 export async function createCalendarEvent(absence: {
   user_name: string;
+  user_email?: string | null;
   type: string;
   date_from: string;
   date_to: string;
-  eventId?: string | null; // 👈 clave para update
+  eventId?: string | null;
 }) {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -38,27 +46,34 @@ export async function createCalendarEvent(absence: {
     auth: oauth2Client,
   });
 
+  const calendarId = process.env.GOOGLE_CALENDAR_ID || "primary";
+  const employeeEmail = absence.user_email?.trim();
+  const attendees = employeeEmail
+    ? [{ email: employeeEmail, displayName: absence.user_name }]
+    : undefined;
+
   const eventPayload = {
     summary: `[LLL] ${absence.type} - ${absence.user_name}`,
     description: `Desde ${absence.date_from} hasta ${absence.date_to}`,
     start: { date: absence.date_from },
-    end: { date: absence.date_to },
+    end: { date: addOneDayISO(absence.date_to) },
+    attendees,
   };
 
-  // ✏️ UPDATE si ya existe
   if (absence.eventId) {
     const updated = await calendar.events.update({
-      calendarId: "primary",
+      calendarId,
       eventId: absence.eventId,
+      sendUpdates: attendees ? "all" : "none",
       requestBody: eventPayload,
     });
 
     return updated.data.id;
   }
 
-  // 🆕 CREATE si no existe
   const created = await calendar.events.insert({
-    calendarId: "primary",
+    calendarId,
+    sendUpdates: attendees ? "all" : "none",
     requestBody: eventPayload,
   });
 

@@ -7,6 +7,8 @@ import { formatARDateTime } from "@/lib/date";
 import {
   createAbsenceMessage,
   listAbsenceMessages,
+  listMyAbsenceMessageUnreadCounts,
+  markAbsenceMessagesRead,
   type AbsenceMessage,
 } from "@/lib/supabase/absenceMessages";
 import type { Absence } from "@/lib/supabase/absences";
@@ -23,8 +25,8 @@ export default function AbsenceConversation({ absence, defaultOpen = false }: Pr
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const didLoad = useRef(false);
   const listRef = useRef<HTMLDivElement | null>(null);
 
   const visibleCount = messages.length + (absence.note ? 1 : 0);
@@ -41,20 +43,45 @@ export default function AbsenceConversation({ absence, defaultOpen = false }: Pr
   }
 
   useEffect(() => {
-    if (!open || didLoad.current) return;
+    if (!userId || open) return;
 
     let alive = true;
-    didLoad.current = true;
+
+    listMyAbsenceMessageUnreadCounts(userId)
+      .then((counts) => {
+        if (alive) setUnreadCount(counts.get(absence.id) ?? 0);
+      })
+      .catch(() => {
+        if (alive) setUnreadCount(0);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [userId, absence.id, open]);
+
+  useEffect(() => {
+    if (!open || !userId) return;
+
+    let alive = true;
     setLoading(true);
     setError(null);
 
     listAbsenceMessages(absence.id)
-      .then((data) => {
-        if (alive) setMessages(data);
+      .then(async (data) => {
+        if (!alive) return;
+
+        setMessages(data);
+
+        try {
+          await markAbsenceMessagesRead(absence.id, userId);
+          if (alive) setUnreadCount(0);
+        } catch {
+          // Reading messages should still work if the read receipt cannot be saved.
+        }
       })
       .catch(() => {
         if (alive) setError("No se pudo cargar la conversacion.");
-        didLoad.current = false;
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -63,7 +90,7 @@ export default function AbsenceConversation({ absence, defaultOpen = false }: Pr
     return () => {
       alive = false;
     };
-  }, [open, absence.id]);
+  }, [open, absence.id, userId]);
 
   useEffect(() => {
     if (!open) return;
@@ -96,21 +123,40 @@ export default function AbsenceConversation({ absence, defaultOpen = false }: Pr
 
   return (
     <div className="mt-3 rounded-xl border border-lll-border bg-lll-bg-softer p-3">
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center justify-between gap-3 text-left"
-      >
+      <div className="flex w-full items-center justify-between gap-3">
         <span className="text-[12px] font-semibold text-lll-text">
           Conversacion
         </span>
-        <span className="shrink-0 rounded-full border border-lll-border bg-lll-bg-soft px-2 py-1 text-[11px] text-lll-text-soft">
-          {visibleCount} {visibleCount === 1 ? "mensaje" : "mensajes"}
-        </span>
-      </button>
+        <div className="flex items-center gap-2">
+          {unreadCount > 0 ? (
+            <span
+              className="flex h-6 min-w-6 items-center justify-center rounded-full bg-lll-accent px-1.5 text-[11px] font-bold text-black"
+              aria-label={`${unreadCount} ${unreadCount === 1 ? "mensaje sin leer" : "mensajes sin leer"}`}
+              title={`${unreadCount} ${unreadCount === 1 ? "mensaje sin leer" : "mensajes sin leer"}`}
+            >
+              {unreadCount > 99 ? "99+" : unreadCount}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setOpen((value) => !value)}
+            className={`shrink-0 rounded-lg border px-3 py-1.5 text-[11px] font-semibold transition ${
+              open
+                ? "border-lll-border bg-lll-bg-soft text-lll-text-soft hover:text-lll-text"
+                : "border-lll-accent bg-lll-accent text-black hover:brightness-110"
+            }`}
+            aria-expanded={open}
+          >
+            {open ? "Cerrar" : unreadCount === 1 ? "Abrir mensaje" : "Abrir mensajes"}
+          </button>
+        </div>
+      </div>
 
       {open ? (
         <div className="mt-3 space-y-3">
+          <p className="text-[11px] text-lll-text-soft">
+            {visibleCount} {visibleCount === 1 ? "mensaje" : "mensajes"} en la conversacion
+          </p>
           <div
             ref={listRef}
             className="max-h-[260px] space-y-2 overflow-y-auto pr-1"

@@ -77,8 +77,15 @@ export async function POST(req: Request) {
 
     if (status === "aprobado" && !absence.google_event_id) {
       try {
+        const { data: employeeProfile } = await supabase
+          .from("profiles")
+          .select("email")
+          .eq("id", absence.user_id)
+          .maybeSingle();
+
         const eventId = await createCalendarEvent({
           user_name: absence.user_name,
+          user_email: employeeProfile?.email ?? null,
           type: absence.type,
           date_from: absence.date_from,
           date_to: absence.date_to,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   getAbsenceType,
@@ -37,12 +37,21 @@ function statusLabel(status: AbsenceStatus) {
 export default function AbsenceList({
   absences,
   onEdit,
+  focusId = null,
 }: {
   absences: Absence[];
   onEdit: (absence: Absence) => void;
+  focusId?: string | null;
 }) {
   const { deleteAbsence } = useAbsences();
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!focusId || absences.length === 0) return;
+
+    const element = document.getElementById(`absence-${focusId}`);
+    element?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [focusId, absences.length]);
 
 async function onDelete(a: Absence) {
   if (a.status !== "pendiente") return;
@@ -53,11 +62,12 @@ async function onDelete(a: Absence) {
   try {
     setBusyId(a.id);
     await deleteAbsence(a.id);
-  } catch (e: any) {
+  } catch (e: unknown) {
     // Evita el crash de Next y muestra un mensaje legible
+    const errorDetails = e as { message?: string; error_description?: string } | null;
     const msg =
-      e?.message ??
-      e?.error_description ??
+      errorDetails?.message ??
+      errorDetails?.error_description ??
       "No se pudo eliminar la solicitud (posible falta de permisos).";
     console.error("deleteAbsence error:", e);
     alert(msg);
@@ -88,7 +98,12 @@ async function onDelete(a: Absence) {
           return (
             <div
               key={a.id}
-              className="rounded-xl border border-lll-border bg-lll-bg-softer p-3"
+              id={`absence-${a.id}`}
+              className={`rounded-xl border bg-lll-bg-softer p-3 transition ${
+                focusId === a.id
+                  ? "border-lll-accent shadow-[0_0_0_2px_rgba(255,200,0,0.15)]"
+                  : "border-lll-border"
+              }`}
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -158,7 +173,7 @@ async function onDelete(a: Absence) {
 
               </div>
 
-              <AbsenceConversation absence={a} />
+              <AbsenceConversation absence={a} defaultOpen={focusId === a.id} />
             </div>
           );
         })}

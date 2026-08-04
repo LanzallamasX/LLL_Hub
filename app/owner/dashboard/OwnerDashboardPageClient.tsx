@@ -50,6 +50,10 @@ export default function OwnerDashboardPageClient() {
   const focusId = searchParams.get("focus");
   const vacAtParam = searchParams.get("vacAt"); // YYYY-MM-DD
 
+  useEffect(() => {
+    if (focusId) setFilter("todas");
+  }, [focusId]);
+
   function isValidDate(v: string | null): v is string {
     return !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
   }

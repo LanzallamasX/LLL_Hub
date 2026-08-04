@@ -32,8 +32,10 @@ export async function deleteCalendarEvent(eventId: string) {
     auth: oauth2Client,
   });
 
+  const calendarId = process.env.GOOGLE_CALENDAR_ID || "primary";
+
   await calendar.events.delete({
-    calendarId: "primary",
+    calendarId,
     eventId,
   });
 }

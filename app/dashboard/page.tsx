@@ -70,6 +70,7 @@ const { isoSet: holidaysISO } = useHolidays(year);
  // const { data: vacDb, loading: vacDbLoading } = useMyVacationBalance(isAuthed && !!userId);
   
   const vacAtParam = searchParams.get("vacAt");
+  const focusId = searchParams.get("focus");
   const vacAtISO = vacAtParam && /^\d{4}-\d{2}-\d{2}$/.test(vacAtParam) ? vacAtParam : null;
   const vacModelParam = (searchParams.get("vacModel") ?? searchParams.get("vacMode") ?? "")
     .trim()
@@ -365,7 +366,7 @@ const [startDateISO, setStartDateISO] = useState<string | null>(null);
             </div>
 
             {/* List */}
-            <AbsenceList absences={myAbsences} onEdit={openEdit} />
+            <AbsenceList absences={myAbsences} onEdit={openEdit} focusId={focusId} />
 
             {/* Vacaciones full width */}
             <VacationBalanceCard />
