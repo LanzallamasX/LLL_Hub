@@ -90,13 +90,19 @@ function vacationDaysBySeniority(years: number) {
 }
 
 /** cupo anual “por antigüedad” (solo informativo) */
-function annualEntitlementBySeniority(startDateISO: string, atISO: string) {
+function annualEntitlementBySeniority(
+  startDateISO: string,
+  atISO: string,
+  vacationDaysOverride: number | null
+) {
   const start = parseISODate(startDateISO);
   const at = parseISODate(atISO);
 
   // regla: antes de 6 meses, todavía no hay “cupo anual”
   const cut = addMonths(start, 6);
   if (at < cut) return 0;
+
+  if (vacationDaysOverride != null) return vacationDaysOverride;
 
   const years = fullYearsBetween(start, at);
   return vacationDaysBySeniority(years);
@@ -153,9 +159,11 @@ type VacRpc = {
 export default function BalancesView({
   targetUserId,
   startDateISO,
+  vacationDaysOverride,
 }: {
   targetUserId: string;
   startDateISO: string | null;
+  vacationDaysOverride: number | null;
 }) {
   const { absences, loadAllAbsences } = useAbsences();
   const didLoad = useRef(false);
@@ -234,8 +242,12 @@ export default function BalancesView({
   // ✅ cupo anual por antigüedad (informativo)
   const vacAnnualEntitlement = useMemo(() => {
     if (!startDateISO) return null;
-    return annualEntitlementBySeniority(startDateISO, periodAtISO);
-  }, [startDateISO, periodAtISO]);
+    return annualEntitlementBySeniority(
+      startDateISO,
+      periodAtISO,
+      vacationDaysOverride
+    );
+  }, [startDateISO, periodAtISO, vacationDaysOverride]);
 
   // OWNER RPC: trae balance real
   useEffect(() => {
@@ -585,9 +597,7 @@ export default function BalancesView({
                       <div className="min-w-0">
                         <p className="text-sm font-semibold leading-tight truncate">{s.label}</p>
 
-                        {/* 👇 Para vacaciones mostramos 2 conceptos:
-                            - Total acumulado (lo que usa el gráfico)
-                            - Cupo anual por antigüedad (informativo) */}
+                        {/* 👇 Para vacaciones mostramos el total acumulado y el cupo anual informativo. */}
                         {showVacInfo(s.balanceKey) ? (
                           <div className="mt-1 text-[12px] text-lll-text-soft space-y-0.5">
                             <div>
@@ -603,7 +613,7 @@ export default function BalancesView({
                               </span>
                             </div>
                             <div>
-                              Cupo anual (antigüedad):{" "}
+                              Cupo anual ({vacationDaysOverride == null ? "antigüedad" : "excepción"}):{" "}
                               <span className="text-lll-text font-semibold">
                                 {vacAnnualEntitlement == null ? "—" : `${vacAnnualEntitlement}${unit}`}
                               </span>
@@ -670,7 +680,7 @@ export default function BalancesView({
                         </span>
                       </div>
                       <div>
-                        Cupo anual (antigüedad):{" "}
+                        Cupo anual ({vacationDaysOverride == null ? "antigüedad" : "excepción"}):{" "}
                         <span className="text-lll-text font-semibold">
                           {vacAnnualEntitlement == null
                             ? "—"

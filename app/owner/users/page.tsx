@@ -318,6 +318,7 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
 
       annual_vacation_days:
         (payload as any).annualVacationDays ?? (payload as any).annual_vacation_days,
+      vacation_days_override: payload.vacation_days_override,
 
       // ✅✅ NUEVO: migración vacaciones (ESTO FALTABA)
       vacation_migration_date:
@@ -329,6 +330,11 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
     // sanity anual days
     if (patch.annual_vacation_days == null || !Number.isFinite(Number(patch.annual_vacation_days))) {
       delete (patch as any).annual_vacation_days;
+    }
+
+    if ("vacation_days_override" in patch) {
+      const raw = patch.vacation_days_override;
+      patch.vacation_days_override = raw == null ? null : Number(raw);
     }
 
     // sanity migration number

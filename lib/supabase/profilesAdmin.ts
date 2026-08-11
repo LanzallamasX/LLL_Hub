@@ -20,6 +20,7 @@ export type ProfileRow = {
   team: string | null;
   start_date: string | null;
   annual_vacation_days: number;
+  vacation_days_override: number | null;
 
   blood_type: string | null;
   emergency_contact_name: string | null;
@@ -33,7 +34,7 @@ export type ProfileRow = {
   updated_at: string;
 };
 
-const PROFILES_SELECT = `
+const PROFILES_SELECT_LEGACY = `
   id,
   email,
   full_name,
@@ -57,6 +58,22 @@ const PROFILES_SELECT = `
   .replace(/\s+/g, " ")
   .trim();
 
+const PROFILES_SELECT = `${PROFILES_SELECT_LEGACY}, vacation_days_override`;
+
+function isMissingVacationOverride(error: { code?: string; message?: string } | null) {
+  return (
+    error?.code === "42703" ||
+    error?.message?.toLowerCase().includes("vacation_days_override") === true
+  );
+}
+
+function withDefaultVacationOverride(rows: unknown[] | null): ProfileRow[] {
+  return (rows ?? []).map((row) => ({
+    ...(row as Omit<ProfileRow, "vacation_days_override">),
+    vacation_days_override: null,
+  }));
+}
+
 export async function listProfiles(): Promise<ProfileRow[]> {
   const { data, error } = await supabase
     .from("profiles")
@@ -64,8 +81,19 @@ export async function listProfiles(): Promise<ProfileRow[]> {
     .order("created_at", { ascending: false })
     .order("email", { ascending: true });
 
+  if (isMissingVacationOverride(error)) {
+    const legacy = await supabase
+      .from("profiles")
+      .select(PROFILES_SELECT_LEGACY)
+      .order("created_at", { ascending: false })
+      .order("email", { ascending: true });
+
+    if (legacy.error) throw new Error(legacy.error.message);
+    return withDefaultVacationOverride(legacy.data as unknown[] | null);
+  }
+
   if (error) throw new Error(error.message);
-  return (data ?? []) as ProfileRow[];
+  return (data ?? []) as unknown as ProfileRow[];
 }
 
 export type UpdateProfilePatch = Partial<
@@ -84,6 +112,7 @@ export type UpdateProfilePatch = Partial<
     | "role"
     | "active"
     | "annual_vacation_days"
+    | "vacation_days_override"
     | "vacation_migration_date"
     | "vacation_available_at_migration"
   >
@@ -115,11 +144,24 @@ export async function updateProfile(id: string, patch: UpdateProfilePatch): Prom
       : 0;
   }
 
+  if (hasOwn(safePatch, "vacation_days_override")) {
+    const raw = safePatch.vacation_days_override;
+    const n = raw == null ? null : Number(raw);
+
+    if (n !== null && (!Number.isInteger(n) || n < 1 || n > 366)) {
+      throw new Error("La excepción de vacaciones debe ser un número entero entre 1 y 366.");
+    }
+
+    safePatch.vacation_days_override = n;
+  }
+
   // ✅ Normaliza: "" -> null para start_date si vino
   if (hasOwn(safePatch, "start_date")) {
     const v = (safePatch.start_date ?? "").toString().trim();
     safePatch.start_date = v ? v : null;
   }
+
+  const updatesVacationOverride = hasOwn(safePatch, "vacation_days_override");
 
   const { data, error } = await supabase
     .from("profiles")
@@ -128,6 +170,24 @@ export async function updateProfile(id: string, patch: UpdateProfilePatch): Prom
     .select(PROFILES_SELECT)
     .single();
 
+  if (isMissingVacationOverride(error)) {
+    if (updatesVacationOverride) {
+      throw new Error(
+        "Para guardar la excepción de vacaciones primero hay que aplicar la migración de Supabase."
+      );
+    }
+
+    const legacy = await supabase
+      .from("profiles")
+      .update(safePatch)
+      .eq("id", id)
+      .select(PROFILES_SELECT_LEGACY)
+      .single();
+
+    if (legacy.error) throw new Error(legacy.error.message);
+    return withDefaultVacationOverride([legacy.data] as unknown[])[0];
+  }
+
   if (error) throw new Error(error.message);
-  return data as ProfileRow;
+  return data as unknown as ProfileRow;
 }

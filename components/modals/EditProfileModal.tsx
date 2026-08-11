@@ -24,8 +24,8 @@ export type EditProfilePayload = {
   role?: ProfileRole;
   active?: boolean;
 
-  // legacy
-  annual_vacation_days?: number;
+  // excepción individual a la regla por antigüedad
+  vacation_days_override?: number | null;
 
   // ✅ migración vacaciones
   vacation_migration_date?: string | null; // YYYY-MM-DD
@@ -129,8 +129,8 @@ export default function EditProfileModal({
   const [role, setRole] = useState<ProfileRole>("user");
   const [active, setActive] = useState(true);
 
-  // legacy
-  const [annualDays, setAnnualDays] = useState<number>(10);
+  // Vacaciones: vacío = política general por antigüedad
+  const [vacationDaysOverride, setVacationDaysOverride] = useState("");
 
   // ✅ migración vacaciones
   const [vacMigrationDate, setVacMigrationDate] = useState("");
@@ -153,6 +153,8 @@ export default function EditProfileModal({
     const uStart = toDateInputValue(user.start_date);
     const uMig = toDateInputValue((user as any).vacation_migration_date);
     const uAvail = toNumberSafe((user as any).vacation_available_at_migration, 0);
+    const uOverride =
+      user.vacation_days_override == null ? "" : String(user.vacation_days_override);
 
     return (
       (user.first_name ?? "") !== firstName ||
@@ -166,7 +168,7 @@ export default function EditProfileModal({
       (user.emergency_contact_phone ?? "") !== emergencyPhone ||
       user.role !== role ||
       user.active !== active ||
-      toNumberSafe(user.annual_vacation_days, 10) !== toNumberSafe(annualDays, 10) ||
+      uOverride !== vacationDaysOverride.trim() ||
       uMig !== vacMigrationDate ||
       uAvail !== toNumberSafe(vacAvailableAtMigration, 0)
     );
@@ -183,7 +185,7 @@ export default function EditProfileModal({
     emergencyPhone,
     role,
     active,
-    annualDays,
+    vacationDaysOverride,
     vacMigrationDate,
     vacAvailableAtMigration,
   ]);
@@ -224,7 +226,9 @@ export default function EditProfileModal({
     setRole(user.role);
     setActive(user.active);
 
-    setAnnualDays(toNumberSafe(user.annual_vacation_days, 10));
+    setVacationDaysOverride(
+      user.vacation_days_override == null ? "" : String(user.vacation_days_override)
+    );
   }, [open, user]);
 
   useEffect(() => {
@@ -256,7 +260,7 @@ export default function EditProfileModal({
     emergencyPhone,
     role,
     active,
-    annualDays,
+    vacationDaysOverride,
     vacMigrationDate,
     vacAvailableAtMigration,
   ]);
@@ -270,6 +274,17 @@ export default function EditProfileModal({
     setErrorMsg(null);
 
     try {
+      const overrideText = vacationDaysOverride.trim();
+      const overrideValue = overrideText ? Number(overrideText) : null;
+
+      if (
+        overrideValue !== null &&
+        (!Number.isInteger(overrideValue) || overrideValue < 1 || overrideValue > 366)
+      ) {
+        setErrorMsg("La excepción de vacaciones debe ser un número entero entre 1 y 366.");
+        return;
+      }
+
       const payload: EditProfilePayload = {
         first_name: firstName.trim() ? firstName.trim() : null,
         last_name: lastName.trim() ? lastName.trim() : null,
@@ -286,8 +301,6 @@ export default function EditProfileModal({
         role,
         active,
 
-        annual_vacation_days: Number.isFinite(annualDays) ? annualDays : 10,
-
         // ✅ migración vacaciones
         vacation_migration_date: vacMigrationDate.trim() ? vacMigrationDate.trim() : null,
         vacation_available_at_migration: Number.isFinite(vacAvailableAtMigration)
@@ -298,6 +311,11 @@ export default function EditProfileModal({
       // ✅ solo si cambió start_date
       if (startDate !== initialStartDate) {
         payload.start_date = startDate.trim() ? startDate.trim() : null;
+      }
+
+      const initialOverride = user.vacation_days_override ?? null;
+      if (overrideValue !== initialOverride) {
+        payload.vacation_days_override = overrideValue;
       }
 
       // guardrail: si seteás disponible pero no fecha, es fácil olvidarse.
@@ -500,21 +518,44 @@ export default function EditProfileModal({
                   </select>
                 </Field>
 
-                <Field
-                  label="Vacaciones / año (legacy)"
-                  hint="Luego lo pasamos a cálculo por políticas usando fecha de ingreso."
-                >
-                  <input
-                    type="number"
-                    min={0}
-                    className={inputClass}
-                    value={annualDays}
-                    onChange={(e) => setAnnualDays(Number(e.target.value))}
-                  />
-                </Field>
               </div>
             </Section>
           </div>
+
+          <Section
+            title="Política de vacaciones"
+            subtitle="Sin una excepción se aplica automáticamente la regla general por antigüedad (14, 21, 28 o 35 días)."
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Field
+                label="Días por año (excepción individual)"
+                hint="Dejalo vacío para usar la regla general. Por ejemplo, cargá 20 si la persona acordó 20 días hábiles desde su ingreso."
+              >
+                <input
+                  type="number"
+                  min={1}
+                  max={366}
+                  step={1}
+                  inputMode="numeric"
+                  className={inputClass}
+                  value={vacationDaysOverride}
+                  onChange={(e) => setVacationDaysOverride(e.target.value)}
+                  placeholder="Regla general"
+                />
+              </Field>
+
+              <div className="flex items-end">
+                <button
+                  type="button"
+                  className="px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-[12px]"
+                  onClick={() => setVacationDaysOverride("")}
+                  disabled={!vacationDaysOverride}
+                >
+                  Usar regla general
+                </button>
+              </div>
+            </div>
+          </Section>
 
           <Section
             title="Migración (vacaciones)"

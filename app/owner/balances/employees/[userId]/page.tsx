@@ -107,7 +107,11 @@ export default function OwnerEmployeeBalanceDetailPage() {
 
       <div className="mt-4">
         {userId ? (
-          <BalancesView targetUserId={userId} startDateISO={startDateISO} />
+          <BalancesView
+            targetUserId={userId}
+            startDateISO={startDateISO}
+            vacationDaysOverride={selectedPerson?.vacation_days_override ?? null}
+          />
         ) : (
           <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4 text-[12px] text-lll-text-soft">
             No se encontró el colaborador.
