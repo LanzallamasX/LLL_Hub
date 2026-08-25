@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useCallback, useContext, useMemo, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
 import type {
   Absence,
@@ -21,13 +21,30 @@ import {
 } from "@/lib/supabase/absences";
 
 import { buildDeductionFromAbsence } from "@/lib/absenceDeductions";
+import { useAuth } from "@/contexts/AuthContext";
 
+function getErrorMessage(error: unknown, fallback: string) {
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+
+  return fallback;
+}
 
 
 type AbsencesContextValue = {
   absences: Absence[];
   isLoading: boolean;
+  isRefreshing: boolean;
   error: string | null;
+
+  hasLoadedAllAbsences: boolean;
+  hasLoadedMyAbsences: (userId: string) => boolean;
 
   pendingCount: number;
 
@@ -49,9 +66,23 @@ type AbsencesContextValue = {
 const AbsencesContext = createContext<AbsencesContextValue | undefined>(undefined);
 
 export function AbsencesProvider({ children }: { children: React.ReactNode }) {
+  const { userId: authUserId } = useAuth();
   const [absences, setAbsences] = useState<Absence[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasLoadedAllAbsences, setHasLoadedAllAbsences] = useState(false);
+  const [loadedUserIds, setLoadedUserIds] = useState<string[]>([]);
+
+  const hasLoadedAllRef = React.useRef(false);
+  const loadedUserIdsRef = React.useRef(new Set<string>());
+  const requestsRef = React.useRef(new Map<string, Promise<void>>());
+
+  const hasLoadedMyAbsences = useCallback(
+    (userId: string) =>
+      hasLoadedAllAbsences || loadedUserIds.includes(userId),
+    [hasLoadedAllAbsences, loadedUserIds]
+  );
 
   const pendingCount = useMemo(
     () => absences.filter((a) => a?.status === "pendiente").length,
@@ -59,29 +90,79 @@ export function AbsencesProvider({ children }: { children: React.ReactNode }) {
   );
 
   const loadMyAbsences = useCallback(async (userId: string) => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const data = await listMyAbsences(userId);
-      setAbsences(data);
-    } catch (e: any) {
-      setError(e?.message ?? "Error cargando ausencias.");
-    } finally {
-      setIsLoading(false);
-    }
+    const requestKey = `user:${userId}`;
+    const pendingRequest = requestsRef.current.get(requestKey);
+    if (pendingRequest) return pendingRequest;
+
+    const hasCachedData =
+      hasLoadedAllRef.current || loadedUserIdsRef.current.has(userId);
+
+    const request = (async () => {
+      if (hasCachedData) setIsRefreshing(true);
+      else setIsLoading(true);
+      setError(null);
+
+      try {
+        const data = await listMyAbsences(userId);
+
+        // Conserva los datos de otros usuarios que un owner ya haya cargado.
+        // Así, navegar entre pantallas no vacía el contexto ni produce flashes.
+        setAbsences((current) => [
+          ...data,
+          ...current.filter((absence) => absence.userId !== userId),
+        ]);
+
+        loadedUserIdsRef.current.add(userId);
+        setLoadedUserIds(Array.from(loadedUserIdsRef.current));
+      } catch (e: unknown) {
+        setError(getErrorMessage(e, "Error cargando ausencias."));
+        loadedUserIdsRef.current.add(userId);
+        setLoadedUserIds(Array.from(loadedUserIdsRef.current));
+      } finally {
+        if (hasCachedData) setIsRefreshing(false);
+        else setIsLoading(false);
+        requestsRef.current.delete(requestKey);
+      }
+    })();
+
+    requestsRef.current.set(requestKey, request);
+    return request;
   }, []);
 
   const loadAllAbsences = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const data = await listAllAbsencesForOwner();
-      setAbsences(data);
-    } catch (e: any) {
-      setError(e?.message ?? "Error cargando ausencias del equipo.");
-    } finally {
-      setIsLoading(false);
-    }
+    const requestKey = "all";
+    const pendingRequest = requestsRef.current.get(requestKey);
+    if (pendingRequest) return pendingRequest;
+
+    const hasCachedData = hasLoadedAllRef.current;
+
+    const request = (async () => {
+      if (hasCachedData) setIsRefreshing(true);
+      else setIsLoading(true);
+      setError(null);
+
+      try {
+        const data = await listAllAbsencesForOwner();
+        setAbsences(data);
+        hasLoadedAllRef.current = true;
+        setHasLoadedAllAbsences(true);
+        for (const absence of data) {
+          loadedUserIdsRef.current.add(absence.userId);
+        }
+        setLoadedUserIds(Array.from(loadedUserIdsRef.current));
+      } catch (e: unknown) {
+        setError(getErrorMessage(e, "Error cargando ausencias del equipo."));
+        hasLoadedAllRef.current = true;
+        setHasLoadedAllAbsences(true);
+      } finally {
+        if (hasCachedData) setIsRefreshing(false);
+        else setIsLoading(false);
+        requestsRef.current.delete(requestKey);
+      }
+    })();
+
+    requestsRef.current.set(requestKey, request);
+    return request;
   }, []);
 
   const createAbsence = useCallback(async (input: CreateAbsenceInput) => {
@@ -89,8 +170,8 @@ export function AbsencesProvider({ children }: { children: React.ReactNode }) {
     try {
       const created = await dbCreateAbsence(input);
       setAbsences((prev) => [created, ...prev]);
-    } catch (e: any) {
-      setError(e?.message ?? "Error creando solicitud.");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Error creando solicitud."));
       throw e;
     }
   }, []);
@@ -100,8 +181,8 @@ export function AbsencesProvider({ children }: { children: React.ReactNode }) {
     try {
       const updated = await dbUpdateAbsence(id, input);
       setAbsences((prev) => prev.map((a) => (a.id === id ? updated : a)));
-    } catch (e: any) {
-      setError(e?.message ?? "Error actualizando solicitud.");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Error actualizando solicitud."));
       throw e;
     }
   }, []);
@@ -111,8 +192,8 @@ export function AbsencesProvider({ children }: { children: React.ReactNode }) {
     try {
       const updated = await updateAbsenceStatus(id, status);
       setAbsences((prev) => prev.map((a) => (a.id === id ? updated : a)));
-    } catch (e: any) {
-      setError(e?.message ?? "Error actualizando estado.");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Error actualizando estado."));
       throw e;
     }
   }, []);
@@ -127,8 +208,8 @@ export function AbsencesProvider({ children }: { children: React.ReactNode }) {
       const updated = await dbApproveAbsence(id, deduction ?? undefined);
 
       setAbsences((prev) => prev.map((a) => (a.id === id ? updated : a)));
-    } catch (e: any) {
-      setError(e?.message ?? "Error aprobando solicitud.");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Error aprobando solicitud."));
       throw e;
     }
   }, [absences]);
@@ -138,8 +219,8 @@ export function AbsencesProvider({ children }: { children: React.ReactNode }) {
     try {
       const updated = await dbRejectAbsence(id);
       setAbsences((prev) => prev.map((a) => (a.id === id ? updated : a)));
-    } catch (e: any) {
-      setError(e?.message ?? "Error rechazando solicitud.");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Error rechazando solicitud."));
       throw e;
     }
   }, []);
@@ -150,8 +231,8 @@ export function AbsencesProvider({ children }: { children: React.ReactNode }) {
     try {
       await dbDeleteAbsence(id);
       setAbsences((prev) => prev.filter((a) => a.id !== id));
-    } catch (e: any) {
-      setError(e?.message ?? "Error eliminando solicitud.");
+    } catch (e: unknown) {
+      setError(getErrorMessage(e, "Error eliminando solicitud."));
       throw e;
     }
   }, []);
@@ -159,14 +240,30 @@ export function AbsencesProvider({ children }: { children: React.ReactNode }) {
   const reset = useCallback(() => {
     setAbsences([]);
     setIsLoading(false);
+    setIsRefreshing(false);
     setError(null);
+    setHasLoadedAllAbsences(false);
+    setLoadedUserIds([]);
+    hasLoadedAllRef.current = false;
+    loadedUserIdsRef.current.clear();
+    requestsRef.current.clear();
   }, []);
+
+  const previousAuthUserRef = React.useRef<string | null>(authUserId);
+  useEffect(() => {
+    const previousUserId = previousAuthUserRef.current;
+    if (previousUserId && previousUserId !== authUserId) reset();
+    previousAuthUserRef.current = authUserId;
+  }, [authUserId, reset]);
 
   const value: AbsencesContextValue = useMemo(
     () => ({
       absences,
       isLoading,
+      isRefreshing,
       error,
+      hasLoadedAllAbsences,
+      hasLoadedMyAbsences,
       pendingCount,
 
       loadMyAbsences,
@@ -186,7 +283,10 @@ export function AbsencesProvider({ children }: { children: React.ReactNode }) {
     [
       absences,
       isLoading,
+      isRefreshing,
       error,
+      hasLoadedAllAbsences,
+      hasLoadedMyAbsences,
       pendingCount,
       loadMyAbsences,
       loadAllAbsences,

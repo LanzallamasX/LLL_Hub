@@ -158,7 +158,7 @@ export default function BalancesSummary({
   if (items.length === 0) return null;
 
   return (
-    <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
+    <div className="lll-fade-in rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold">Tus cupos</p>
@@ -169,10 +169,11 @@ export default function BalancesSummary({
       </div>
 
       <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-        {items.map((it) => (
+        {items.map((it, index) => (
           <div
             key={it.key}
-            className="rounded-2xl border border-lll-border bg-lll-bg-softer p-4"
+            className="lll-surface-enter rounded-2xl border border-lll-border bg-lll-bg-softer p-4"
+            style={{ "--lll-enter-delay": `${index * 55}ms` } as React.CSSProperties}
           >
             <div className="flex items-center justify-between gap-3">
               <p className="text-sm font-semibold">{it.label}</p>
@@ -194,7 +195,7 @@ export default function BalancesSummary({
             <div className="mt-3">
               <div className="h-2 w-full rounded-full bg-lll-bg-soft border border-lll-border overflow-hidden">
                 <div
-                  className={`h-full rounded-full ${
+                  className={`lll-progress-fill h-full rounded-full ${
                     it.tone === "danger"
                       ? "bg-red-400/80"
                       : it.tone === "warn"

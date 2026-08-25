@@ -6,7 +6,16 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import UserLayout from "@/components/layout/UserLayout";
 import AbsenceList from "@/components/dashboard/AbsenceList";
+import AbsencesSkeleton from "@/components/dashboard/AbsencesSkeleton";
 import NewAbsenceModal, { NewAbsencePayload } from "@/components/modals/NewAbsenceModal";
+import { AppIcon } from "@/components/ui/AppIcon";
+import {
+  PageSummary,
+  SummaryChip,
+  SummaryIcon,
+} from "@/components/ui/PageSummary";
+import { SearchField } from "@/components/ui/SearchField";
+import { SectionCard } from "@/components/ui/SectionCard";
 
 import { useAbsences } from "@/contexts/AbsencesContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -26,6 +35,7 @@ import { useHolidays } from "@/lib/holidays/useHolidays";
 import { supabase } from "@/lib/supabase/client";
 import {
   fetchVacationPolicySettings,
+  getCachedVacationPolicySettings,
   normalizeVacationPolicyMode,
   type VacationPolicyMode,
 } from "@/lib/supabase/vacationPolicy";
@@ -54,6 +64,8 @@ export default function AbsencesPageClient() {
     createAbsence,
     updateAbsence,
     isLoading: absLoading,
+    isRefreshing: absRefreshing,
+    hasLoadedMyAbsences,
     error: absError,
   } = useAbsences();
 
@@ -70,7 +82,17 @@ export default function AbsencesPageClient() {
   const vacModelParam = (searchParams.get("vacModel") ?? searchParams.get("vacMode") ?? "")
     .trim()
     .toLowerCase();
-  const [vacModel, setVacModel] = useState<VacationPolicyMode>("anniversary");
+  const cachedVacationPolicy = getCachedVacationPolicySettings();
+  const hasExplicitVacModel =
+    vacModelParam === "october" || vacModelParam === "anniversary";
+  const [vacModel, setVacModel] = useState<VacationPolicyMode>(() =>
+    hasExplicitVacModel
+      ? normalizeVacationPolicyMode(vacModelParam)
+      : cachedVacationPolicy?.policy_mode ?? "anniversary"
+  );
+  const [vacModelReady, setVacModelReady] = useState(
+    hasExplicitVacModel || cachedVacationPolicy !== null
+  );
 
   useEffect(() => {
     if (!isAuthed) return;
@@ -79,16 +101,25 @@ export default function AbsencesPageClient() {
 
     (async () => {
       if (vacModelParam === "october" || vacModelParam === "anniversary") {
-        setVacModel(normalizeVacationPolicyMode(vacModelParam));
+        if (alive) {
+          setVacModel(normalizeVacationPolicyMode(vacModelParam));
+          setVacModelReady(true);
+        }
         return;
       }
 
       try {
         const policy = await fetchVacationPolicySettings();
-        if (alive) setVacModel(policy.policy_mode);
+        if (alive) {
+          setVacModel(policy.policy_mode);
+          setVacModelReady(true);
+        }
       } catch (e) {
         console.error("fetchVacationPolicySettings error", e);
-        if (alive) setVacModel("anniversary");
+        if (alive) {
+          setVacModel("anniversary");
+          setVacModelReady(true);
+        }
       }
     })();
 
@@ -101,8 +132,7 @@ export default function AbsencesPageClient() {
   const year = useMemo(() => yearFromISO(asOfISO), [asOfISO]);
   const { isoSet: holidaysISO } = useHolidays(year);
 
-  // Evita doble load en dev (StrictMode)
-  const didLoad = useRef(false);
+  const refreshKeyRef = useRef<string | null>(null);
 
   // ✅ Vacaciones DB
   const [vacDb, setVacDb] = useState<VacationBalance | null>(null);
@@ -124,6 +154,16 @@ export default function AbsencesPageClient() {
     if (!userId) return [];
     return absences.filter((a) => a.userId === userId);
   }, [absences, userId]);
+
+  const statusCounts = useMemo(
+    () => ({
+      total: myAbsences.length,
+      pending: myAbsences.filter((absence) => absence.status === "pendiente").length,
+      approved: myAbsences.filter((absence) => absence.status === "aprobado").length,
+      rejected: myAbsences.filter((absence) => absence.status === "rechazado").length,
+    }),
+    [myAbsences]
+  );
 
   const visibleItems = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -162,56 +202,58 @@ export default function AbsencesPageClient() {
     async (opts?: { forceAbsences?: boolean }) => {
       if (!isAuthed || !userId) return;
 
-      // 1) Ausencias
-      if (opts?.forceAbsences) {
-        await loadMyAbsences(userId);
-      } else {
-        if (!didLoad.current) {
-          didLoad.current = true;
-          await loadMyAbsences(userId);
-        }
-      }
-
-      // 2) start_date (profile)
       setStartDateLoading(true);
-      try {
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("start_date")
-          .eq("id", userId)
-          .maybeSingle();
-
-        if (error) throw error;
-        setStartDateISO(data?.start_date ?? null);
-      } catch {
-        setStartDateISO(null);
-      } finally {
-        setStartDateLoading(false);
-      }
-
-      // 3) Balance vacaciones (según asOfISO)
       setVacDbLoading(true);
-      try {
-        const b =
-          vacModel === "october"
-            ? await supabase
-                .rpc("get_vacation_balance_october_preview_for_user_at", {
-                  p_user_id: userId,
-                  p_at: asOfISO ?? undefined,
-                })
-                .then(({ data, error }) => {
-                  if (error) throw error;
-                  return data as VacationBalance;
-                })
-            : await fetchMyVacationBalance(asOfISO ?? undefined);
-        setVacDb(b);
-      } catch {
-        setVacDb(null);
-      } finally {
-        setVacDbLoading(false);
-      }
+
+      const shouldLoadAbsences =
+        opts?.forceAbsences || !hasLoadedMyAbsences(userId);
+
+      const absencesPromise = shouldLoadAbsences
+        ? loadMyAbsences(userId)
+        : Promise.resolve();
+
+      const profilePromise = (async () => {
+        try {
+          const { data, error } = await supabase
+            .from("profiles")
+            .select("start_date")
+            .eq("id", userId)
+            .maybeSingle();
+
+          if (error) throw error;
+          setStartDateISO(data?.start_date ?? null);
+        } catch {
+          setStartDateISO(null);
+        } finally {
+          setStartDateLoading(false);
+        }
+      })();
+
+      const vacationPromise = (async () => {
+        try {
+          const b =
+            vacModel === "october"
+              ? await supabase
+                  .rpc("get_vacation_balance_october_preview_for_user_at", {
+                    p_user_id: userId,
+                    p_at: asOfISO ?? undefined,
+                  })
+                  .then(({ data, error }) => {
+                    if (error) throw error;
+                    return data as VacationBalance;
+                  })
+              : await fetchMyVacationBalance(asOfISO ?? undefined);
+          setVacDb(b);
+        } catch {
+          setVacDb(null);
+        } finally {
+          setVacDbLoading(false);
+        }
+      })();
+
+      await Promise.all([absencesPromise, profilePromise, vacationPromise]);
     },
-    [isAuthed, userId, loadMyAbsences, asOfISO, vacModel]
+    [isAuthed, userId, loadMyAbsences, hasLoadedMyAbsences, asOfISO, vacModel]
   );
 
   // Gate de auth + redirect
@@ -228,9 +270,14 @@ export default function AbsencesPageClient() {
   useEffect(() => {
     if (isLoading) return;
     if (!isAuthed || !userId) return;
+    if (!vacModelReady) return;
 
-    refreshAll({ forceAbsences: true });
-  }, [isLoading, isAuthed, userId, asOfISO, refreshAll]);
+    const refreshKey = `${userId}:${asOfISO ?? "today"}:${vacModel}`;
+    if (refreshKeyRef.current === refreshKey) return;
+    refreshKeyRef.current = refreshKey;
+
+    void refreshAll({ forceAbsences: true });
+  }, [isLoading, isAuthed, userId, asOfISO, vacModel, vacModelReady, refreshAll]);
 
   function openCreate() {
     setEditing(null);
@@ -262,6 +309,8 @@ async function handleSubmit(payload: NewAbsencePayload) {
       note: payload.note,
       subtype: payload.subtype ?? null,
       hours: payload.hours ?? null,
+      timeFrom: payload.timeFrom ?? null,
+      timeTo: payload.timeTo ?? null,
     });
 
     await refreshAll({ forceAbsences: true });
@@ -270,25 +319,40 @@ async function handleSubmit(payload: NewAbsencePayload) {
   }
 
   // 👉 CREACIÓN
-  await createAbsence({
-    userId: currentUser.userId,
-    userName: currentUser.userName,
-    from: payload.from,
-    to: payload.to,
-    type: payload.type,
-    note: payload.note,
-    subtype: payload.subtype ?? null,
-    hours: payload.hours ?? null,
-    notifyOwnerIds: payload.notifyOwnerIds ?? [],
-  });
+  const requestDates = payload.dates?.length
+    ? payload.dates
+    : [payload.from];
+
+  for (const requestDate of requestDates) {
+    await createAbsence({
+      userId: currentUser.userId,
+      userName: currentUser.userName,
+      from: requestDate,
+      to: payload.dates?.length ? requestDate : payload.to,
+      type: payload.type,
+      note: payload.note,
+      subtype: payload.subtype ?? null,
+      hours: payload.hours ?? null,
+      timeFrom: payload.timeFrom ?? null,
+      timeTo: payload.timeTo ?? null,
+      notifyOwnerIds: payload.notifyOwnerIds ?? [],
+    });
+  }
 
   // 🚀 DISPARA EMAIL (no bloquea)
-  await processPendingEmails("absence created");
+  await processPendingEmails(
+    requestDates.length > 1
+      ? `${requestDates.length} absences created`
+      : "absence created"
+  );
 
   await refreshAll({ forceAbsences: true });
   closeModal();
 }
 
+  const contentReady = userId ? hasLoadedMyAbsences(userId) : false;
+  const isRefreshing =
+    absLoading || absRefreshing || vacDbLoading || startDateLoading;
 
   // Gates
   if (isLoading) {
@@ -319,75 +383,94 @@ async function handleSubmit(payload: NewAbsencePayload) {
         subtitle: "Historial y gestión de tus solicitudes.",
       }}
     >
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-[clamp(1.5rem,5vw,1.875rem)] font-semibold leading-tight">Mis ausencias</h1>
-          <p className="mt-1 text-sm text-lll-text-soft">
-            Creá solicitudes, revisá estados y editá mientras estén pendientes.
-          </p>
+      <div className="mx-auto max-w-7xl space-y-4">
+        <PageSummary
+          leading={
+            <SummaryIcon>
+              <AppIcon name="absence" className="h-7 w-7" />
+            </SummaryIcon>
+          }
+          title="Mis ausencias"
+          subtitle="Creá solicitudes, revisá estados y editá mientras estén pendientes."
+          meta={
+            contentReady ? (
+              <>
+                <SummaryChip>{statusCounts.total} solicitudes</SummaryChip>
+                <SummaryChip>{statusCounts.pending} pendientes</SummaryChip>
+                <SummaryChip>{statusCounts.approved} aprobadas</SummaryChip>
+                {statusCounts.rejected > 0 ? (
+                  <SummaryChip>{statusCounts.rejected} rechazadas</SummaryChip>
+                ) : null}
+              </>
+            ) : (
+              <SummaryChip>Cargando solicitudes…</SummaryChip>
+            )
+          }
+          actions={
+            <button
+              onClick={openCreate}
+              className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-lll-accent px-4 py-2 text-sm font-semibold text-black transition hover:brightness-110 disabled:cursor-wait disabled:opacity-50"
+              type="button"
+              disabled={!contentReady || isRefreshing}
+            >
+              <AppIcon name="plus" className="h-4 w-4" />
+              Nueva solicitud
+            </button>
+          }
+        />
 
-          {absLoading && <p className="mt-1 text-[12px] text-lll-text-soft">Cargando…</p>}
-          {absError && <p className="mt-1 text-[12px] text-red-300">{absError}</p>}
-          {vacDbLoading && (
-            <p className="mt-1 text-[12px] text-lll-text-soft">Cargando vacaciones…</p>
-          )}
-          {startDateLoading && (
-            <p className="mt-1 text-[12px] text-lll-text-soft">Cargando fecha de ingreso…</p>
-          )}
-
-          {asOfISO ? (
-            <p className="mt-1 text-[12px] text-amber-300">
-              Modo test activo: simulando fecha {asOfISO}
-              {vacModel === "october" ? " · preview octubre" : ""}
-            </p>
-          ) : null}
-        </div>
-
-        <button
-          onClick={openCreate}
-          className="px-4 py-2 rounded-lg bg-lll-accent text-black font-semibold"
-          type="button"
-        >
-          + Nueva solicitud
-        </button>
-      </div>
-
-      <div className="mt-6 rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
-        <div className="flex flex-col lg:flex-row lg:items-center gap-3 lg:justify-between">
-          <div className="flex flex-wrap items-center gap-2">
-            {(["todas", "pendiente", "aprobado", "rechazado"] as Filter[]).map((f) => (
-              <button
-                key={f}
-                type="button"
-                onClick={() => setFilter(f)}
-                className={`px-3 py-2 rounded-lg text-sm border ${
-                  filter === f
-                    ? "bg-lll-accent-soft border-lll-accent/50 text-lll-text"
-                    : "bg-lll-bg-soft border-lll-border text-lll-text-soft"
-                }`}
-              >
-                {f === "todas" ? "Todas" : f[0].toUpperCase() + f.slice(1)}
-              </button>
-            ))}
+        {absError ? (
+          <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            {absError}
           </div>
+        ) : null}
 
-          <div className="w-full lg:w-[360px]">
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm"
-              placeholder="Buscar por tipo o nota…"
-              type="text"
-            />
+        {asOfISO ? (
+          <div className="flex items-center gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-[12px] text-amber-200">
+            <AppIcon name="info" className="h-4 w-4 shrink-0" />
+            Modo test activo: simulando fecha {asOfISO}
+            {vacModel === "october" ? " · preview octubre" : ""}
           </div>
-        </div>
-      </div>
+        ) : null}
 
-      <div className="mt-6">
-        <AbsenceList absences={visibleItems} onEdit={openEdit} />
-        {visibleItems.length === 0 && (
-          <div className="mt-4 rounded-2xl border border-lll-border bg-lll-bg-soft p-6 text-sm text-lll-text-soft">
-            No hay solicitudes para mostrar.
+        {!contentReady ? (
+          <AbsencesSkeleton />
+        ) : (
+          <div className="lll-fade-in space-y-4">
+            <SectionCard
+              title="Buscar y filtrar"
+              description={`${visibleItems.length} solicitud${visibleItems.length === 1 ? "" : "es"} visible${visibleItems.length === 1 ? "" : "s"}.`}
+              icon={<AppIcon name="filter" className="h-4 w-4" />}
+              action={
+                <SearchField
+                  className="w-[min(360px,42vw)] max-w-full"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Buscar por tipo o nota…"
+                />
+              }
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                {(["todas", "pendiente", "aprobado", "rechazado"] as Filter[]).map((filterOption) => (
+                  <button
+                    key={filterOption}
+                    type="button"
+                    onClick={() => setFilter(filterOption)}
+                    className={`rounded-full border px-3 py-2 text-[12px] transition ${
+                      filter === filterOption
+                        ? "border-lll-accent/50 bg-lll-accent-soft text-lll-text"
+                        : "border-lll-border bg-lll-bg-softer text-lll-text-soft hover:text-lll-text"
+                    }`}
+                  >
+                    {filterOption === "todas"
+                      ? "Todas"
+                      : filterOption[0].toUpperCase() + filterOption.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </SectionCard>
+
+            <AbsenceList absences={visibleItems} onEdit={openEdit} />
           </div>
         )}
       </div>
@@ -396,7 +479,20 @@ async function handleSubmit(payload: NewAbsencePayload) {
         open={isModalOpen}
         onClose={closeModal}
         onSubmit={handleSubmit}
-        initial={editing ? { /* ...tu initial actual... */ } : undefined}
+        initial={
+          editing
+            ? {
+                from: editing.from,
+                to: editing.to,
+                type: editing.type,
+                note: editing.note ?? undefined,
+                subtype: editing.subtype ?? null,
+                hours: editing.hours ?? null,
+                timeFrom: editing.timeFrom ?? null,
+                timeTo: editing.timeTo ?? null,
+              }
+            : undefined
+        }
         submitLabel={editing ? "Guardar cambios" : "Enviar"}
         title={editing ? "Editar solicitud" : "Nueva solicitud"}
         subtitle={

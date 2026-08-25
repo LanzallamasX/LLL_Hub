@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { AllowedUser, AllowedUserRole } from "@/lib/supabase/allowedUsers";
+import { usePresence } from "@/components/ui/usePresence";
 
 export type EditAllowedUserPayload = {
   full_name?: string | null;
@@ -35,6 +36,7 @@ export default function EditAllowedUserModal({
   const [initialStartDate, setInitialStartDate] = useState("");
 
   const [annualDays, setAnnualDays] = useState<number>(10);
+  const modalPresence = usePresence(open);
 
   const canSave = useMemo(() => !!user, [user]);
 
@@ -53,7 +55,7 @@ export default function EditAllowedUserModal({
     setAnnualDays(Number(user.annual_vacation_days ?? 10));
   }, [open, user]);
 
-  if (!open) return null;
+  if (!modalPresence.shouldRender) return null;
 
   async function handleSave() {
     if (!user) return;
@@ -77,11 +79,19 @@ export default function EditAllowedUserModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
+      className="lll-presence-root fixed inset-0 z-50 flex items-center justify-center p-4"
+      data-state={modalPresence.state}
       role="dialog"
       aria-modal="true"
+      aria-hidden={!open}
     >
-      <div className="w-full max-w-xl rounded-2xl border border-lll-border bg-lll-bg-soft overflow-hidden">
+      <button
+        type="button"
+        className="lll-modal-backdrop absolute inset-0 bg-black/60 backdrop-blur-[2px]"
+        onClick={onClose}
+        aria-label="Cerrar modal"
+      />
+      <div className="lll-modal-panel relative w-full max-w-xl rounded-2xl border border-lll-border bg-lll-bg-soft overflow-hidden shadow-2xl">
         <div className="p-4 border-b border-lll-border flex items-center justify-between">
           <div>
             <p className="text-sm font-semibold">Editar usuario</p>

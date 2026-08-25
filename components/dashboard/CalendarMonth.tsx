@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import type { Absence } from "@/lib/supabase/absences";
 import { getAbsenceTypeLabel } from "@/lib/absenceTypes";
 import { formatAR, toDate00 } from "@/lib/date";
+import { usePresence } from "@/components/ui/usePresence";
+import { AppIcon } from "@/components/ui/AppIcon";
 
 type CalendarMode = "owner" | "user";
 
@@ -107,6 +109,7 @@ export default function CalendarMonth({
 }: Props) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const drawerPresence = usePresence(drawerOpen);
 
   const daysGrid = useMemo(() => {
     const first = new Date(viewYear, viewMonth, 1);
@@ -195,11 +198,12 @@ export default function CalendarMonth({
 
         <div className="flex flex-wrap items-center gap-2">
           <button
-            className="min-h-10 px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-[clamp(0.75rem,2.2vw,0.875rem)] leading-tight hover:opacity-90"
+            className="flex h-10 w-10 items-center justify-center rounded-lg border border-lll-border bg-lll-bg-softer text-lll-text-soft transition hover:text-lll-text"
             onClick={onPrevMonth}
             type="button"
+            aria-label="Mes anterior"
           >
-            ←
+            <AppIcon name="arrowRight" className="h-4 w-4 rotate-180" />
           </button>
 
           <span className="min-h-10 inline-flex items-center text-[12px] px-3 py-2 rounded-full border border-lll-border bg-lll-bg-softer text-lll-text-soft">
@@ -207,18 +211,20 @@ export default function CalendarMonth({
           </span>
 
           <button
-            className="min-h-10 px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-[clamp(0.75rem,2.2vw,0.875rem)] leading-tight hover:opacity-90"
+            className="flex h-10 w-10 items-center justify-center rounded-lg border border-lll-border bg-lll-bg-softer text-lll-text-soft transition hover:text-lll-text"
             onClick={onNextMonth}
             type="button"
+            aria-label="Mes siguiente"
           >
-            →
+            <AppIcon name="arrowRight" className="h-4 w-4" />
           </button>
 
           <button
-            className="min-h-10 px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-[clamp(0.75rem,2.2vw,0.875rem)] leading-tight hover:opacity-90"
+            className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-lll-border bg-lll-bg-softer px-3 py-2 text-sm text-lll-text-soft transition hover:text-lll-text"
             onClick={onToday}
             type="button"
           >
+            <AppIcon name="calendar" className="h-4 w-4" />
             Hoy
           </button>
         </div>
@@ -234,7 +240,10 @@ export default function CalendarMonth({
           ))}
         </div>
 
-        <div className="mt-3 grid grid-cols-7 gap-2 lg:gap-3">
+        <div
+          key={`${viewYear}-${viewMonth}`}
+          className="lll-fade-in mt-3 grid grid-cols-7 gap-2 lg:gap-3"
+        >
           {daysGrid.map((cell, idx) => {
             if (!cell.date) {
               return (
@@ -263,7 +272,9 @@ export default function CalendarMonth({
                       "",
                       ...hits.map((a) => {
                         const who = a.userName ? `${a.userName} · ` : "";
-                        const typ = getAbsenceTypeLabel(a.type as any);
+                        const typ = getAbsenceTypeLabel(
+                          a.type as Parameters<typeof getAbsenceTypeLabel>[0],
+                        );
                         const range = `${formatAR(a.from)} → ${formatAR(a.to)}`;
                         return `• ${who}${typ} (${a.status}) — ${range}`;
                       }),
@@ -321,11 +332,11 @@ export default function CalendarMonth({
                 {total > 0 ? (
                   <div className="absolute left-2 right-2 sm:left-3 sm:right-3 bottom-2 h-1.5 rounded-full overflow-hidden border border-lll-border bg-lll-bg">
                     <div
-                      className="h-full bg-amber-500/70"
+                      className="lll-progress-fill h-full bg-amber-500/70"
                       style={{ width: `${Math.round((pendingCount / total) * 100)}%` }}
                     />
                     <div
-                      className="h-full bg-emerald-500/70"
+                      className="lll-progress-fill h-full bg-emerald-500/70"
                       style={{ width: `${Math.round((approvedCount / total) * 100)}%` }}
                     />
                   </div>
@@ -360,18 +371,24 @@ export default function CalendarMonth({
 
       {/* Drawer owner */}
 {/* Modal detalle del día (owner) */}
-{mode === "owner" && drawerOpen ? (
-  <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+{mode === "owner" && drawerPresence.shouldRender ? (
+  <div
+    className="lll-presence-root fixed inset-0 z-50 flex items-center justify-center p-4"
+    data-state={drawerPresence.state}
+    role="dialog"
+    aria-modal="true"
+    aria-hidden={!drawerOpen}
+  >
     {/* overlay */}
     <button
       aria-label="Cerrar"
-      className="absolute inset-0 bg-black/60 backdrop-blur-[2px]"
+      className="lll-modal-backdrop absolute inset-0 bg-black/60 backdrop-blur-[2px]"
       onClick={closeDrawer}
       type="button"
     />
 
     {/* panel */}
-    <div className="relative w-full max-w-lg rounded-2xl border border-lll-border bg-lll-bg shadow-2xl">
+    <div className="lll-modal-panel relative w-full max-w-lg rounded-2xl border border-lll-border bg-lll-bg shadow-2xl">
       {/* header */}
       <div className="flex items-start justify-between gap-3 p-4 border-b border-lll-border">
         <div>
@@ -408,7 +425,9 @@ export default function CalendarMonth({
         ) : (
           <div className="max-h-[60vh] overflow-auto space-y-2 pr-1">
             {selectedHits.map((a) => {
-              const rawLabel = getAbsenceTypeLabel(a.type as any);
+              const rawLabel = getAbsenceTypeLabel(
+                a.type as Parameters<typeof getAbsenceTypeLabel>[0],
+              );
               const safeLabel = isSensitiveType(String(a.type)) ? "Ausencia" : rawLabel;
 
               return (

@@ -3,6 +3,17 @@
 import { useEffect, useMemo, useState } from "react";
 import UserLayout from "@/components/layout/UserLayout";
 import { useAuth } from "@/contexts/AuthContext";
+import {
+  FormField as Field,
+  formControlClassName as inputClassName,
+} from "@/components/ui/FormField";
+import {
+  PageSummary,
+  SummaryChip,
+  SummaryIcon,
+} from "@/components/ui/PageSummary";
+import { SectionCard as ProfileSection } from "@/components/ui/SectionCard";
+import { Skeleton } from "@/components/ui/Skeleton";
 
 import {
   fetchMyProfileFull,
@@ -10,11 +21,13 @@ import {
   type Profile,
 } from "@/lib/supabase/profile";
 
-function splitFullName(fullName?: string | null) {
-  const v = (fullName ?? "").trim();
-  if (!v) return { firstName: "", lastName: "" };
+const profileCache = new Map<string, Profile>();
 
-  const parts = v.split(/\s+/).filter(Boolean);
+function splitFullName(fullName?: string | null) {
+  const value = (fullName ?? "").trim();
+  if (!value) return { firstName: "", lastName: "" };
+
+  const parts = value.split(/\s+/).filter(Boolean);
   if (parts.length === 1) return { firstName: parts[0], lastName: "" };
 
   return {
@@ -25,58 +38,158 @@ function splitFullName(fullName?: string | null) {
 
 function calcAge(birthDateISO?: string | null) {
   if (!birthDateISO) return null;
-  const b = new Date(birthDateISO);
-  if (Number.isNaN(b.getTime())) return null;
+  const birthDate = new Date(birthDateISO);
+  if (Number.isNaN(birthDate.getTime())) return null;
 
   const now = new Date();
-  let age = now.getFullYear() - b.getFullYear();
-  const m = now.getMonth() - b.getMonth();
-  if (m < 0 || (m === 0 && now.getDate() < b.getDate())) age--;
+  let age = now.getFullYear() - birthDate.getFullYear();
+  const monthDifference = now.getMonth() - birthDate.getMonth();
+  if (
+    monthDifference < 0 ||
+    (monthDifference === 0 && now.getDate() < birthDate.getDate())
+  ) {
+    age--;
+  }
   return age;
 }
 
+function getErrorMessage(error: unknown, fallback: string) {
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+
+  return fallback;
+}
+
+function ProfileSkeleton() {
+  return (
+    <div className="mx-auto max-w-7xl space-y-4">
+      <section className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4 sm:p-5">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-4">
+            <Skeleton className="h-14 w-14 shrink-0 rounded-2xl" />
+            <div className="space-y-2">
+              <Skeleton className="h-5 w-44 max-w-[55vw]" />
+              <Skeleton className="h-3 w-56 max-w-[65vw]" />
+              <div className="flex gap-2">
+                <Skeleton className="h-6 w-20 rounded-full" />
+                <Skeleton className="h-6 w-16 rounded-full" />
+              </div>
+            </div>
+          </div>
+          <Skeleton className="h-10 w-36 rounded-lg" />
+        </div>
+      </section>
+
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        {[0, 1].map((section) => (
+          <section
+            key={section}
+            className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4 sm:p-5"
+          >
+            <Skeleton className="h-4 w-32" />
+            <Skeleton className="mt-2 h-3 w-56 max-w-full" />
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {[0, 1, 2, 3].map((field) => (
+                <div key={field} className="space-y-2">
+                  <Skeleton className="h-3 w-20" />
+                  <Skeleton className="h-10 w-full rounded-lg" />
+                </div>
+              ))}
+            </div>
+          </section>
+        ))}
+
+        <section className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4 sm:p-5 xl:col-span-2">
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="mt-2 h-3 w-64 max-w-full" />
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+            {[0, 1, 2].map((field) => (
+              <div key={field} className="space-y-2">
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="h-10 w-full rounded-lg" />
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
 export default function ProfilePage() {
-  const { role, refreshProfile } = useAuth();
+  const { role, userId, refreshProfile } = useAuth();
   const isOwner = role === "owner";
 
-  const [profile, setProfile] = useState<Profile | null>(null);
+  const cachedProfile = userId ? profileCache.get(userId) ?? null : null;
+  const cachedNames = cachedProfile
+    ? cachedProfile.first_name || cachedProfile.last_name
+      ? {
+          firstName: (cachedProfile.first_name ?? "").trim(),
+          lastName: (cachedProfile.last_name ?? "").trim(),
+        }
+      : splitFullName(cachedProfile.full_name)
+    : { firstName: "", lastName: "" };
 
-  // UI fields (fuente: first/last; fallback: full_name)
-  const [firstName, setFirstName] = useState("");
-  const [lastName, setLastName] = useState("");
-
-  const [loading, setLoading] = useState(true);
+  const [profile, setProfile] = useState<Profile | null>(cachedProfile);
+  const [firstName, setFirstName] = useState(cachedNames.firstName);
+  const [lastName, setLastName] = useState(cachedNames.lastName);
+  const [loading, setLoading] = useState(cachedProfile === null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
   useEffect(() => {
+    if (!userId) return;
+    const resolvedUserId = userId;
+
     async function load() {
+      const cached = profileCache.get(resolvedUserId) ?? null;
+      if (cached) {
+        setProfile(cached);
+        const names =
+          cached.first_name || cached.last_name
+            ? {
+                firstName: (cached.first_name ?? "").trim(),
+                lastName: (cached.last_name ?? "").trim(),
+              }
+            : splitFullName(cached.full_name);
+        setFirstName(names.firstName);
+        setLastName(names.lastName);
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
+
       try {
-        const p = await fetchMyProfileFull();
-        setProfile(p);
+        const loadedProfile = await fetchMyProfileFull();
+        if (loadedProfile) profileCache.set(resolvedUserId, loadedProfile);
+        setProfile(loadedProfile);
 
-        // ✅ preferimos first/last reales
-        const fn = (p?.first_name ?? "").trim();
-        const ln = (p?.last_name ?? "").trim();
+        const loadedFirstName = (loadedProfile?.first_name ?? "").trim();
+        const loadedLastName = (loadedProfile?.last_name ?? "").trim();
 
-        if (fn || ln) {
-          setFirstName(fn);
-          setLastName(ln);
+        if (loadedFirstName || loadedLastName) {
+          setFirstName(loadedFirstName);
+          setLastName(loadedLastName);
         } else {
-          // fallback legacy
-          const s = splitFullName(p?.full_name);
-          setFirstName(s.firstName);
-          setLastName(s.lastName);
+          const splitName = splitFullName(loadedProfile?.full_name);
+          setFirstName(splitName.firstName);
+          setLastName(splitName.lastName);
         }
-      } catch (e: any) {
-        setError(e?.message ?? "Error cargando perfil.");
+      } catch (loadError: unknown) {
+        setError(getErrorMessage(loadError, "Error cargando perfil."));
       } finally {
         setLoading(false);
       }
     }
-    load();
-  }, []);
+    void load();
+  }, [userId]);
 
   const age = useMemo(
     () => calcAge(profile?.birth_date ?? null),
@@ -84,9 +197,19 @@ export default function ProfilePage() {
   );
 
   const computedFullName = useMemo(() => {
-    const full = `${firstName} ${lastName}`.trim();
-    return full || null;
+    const fullName = `${firstName} ${lastName}`.trim();
+    return fullName || null;
   }, [firstName, lastName]);
+
+  const initials = useMemo(() => {
+    const nameInitials = [firstName, lastName]
+      .filter(Boolean)
+      .map((name) => name.trim()[0]?.toUpperCase())
+      .join("")
+      .slice(0, 2);
+
+    return nameInitials || profile?.email?.[0]?.toUpperCase() || "U";
+  }, [firstName, lastName, profile?.email]);
 
   async function handleSave() {
     if (!profile) return;
@@ -97,33 +220,25 @@ export default function ProfilePage() {
 
     try {
       const updated = await updateMyProfile({
-        // identidad
         first_name: firstName.trim() || null,
         last_name: lastName.trim() || null,
-        full_name: computedFullName, // legacy compat (AuthHeader/Aside)
-
-        // personales
+        full_name: computedFullName,
         birth_date: profile.birth_date ?? null,
         blood_type: profile.blood_type ?? null,
         emergency_contact_name: profile.emergency_contact_name ?? null,
         emergency_contact_phone: profile.emergency_contact_phone ?? null,
-
-        // laborales
         team: profile.team ?? null,
-
-        // RRHH (solo owner; updateMyProfile filtra igual)
         dni: profile.dni ?? null,
         job_title: profile.job_title ?? null,
         start_date: profile.start_date ?? null,
       });
 
       setProfile(updated);
+      if (userId) profileCache.set(userId, updated);
       setSuccess(true);
-
-      // ✅ actualiza Header/Aside (AuthContext)
       await refreshProfile();
-    } catch (e: any) {
-      setError(e?.message ?? "Error guardando cambios.");
+    } catch (saveError: unknown) {
+      setError(getErrorMessage(saveError, "Error guardando cambios."));
     } finally {
       setSaving(false);
     }
@@ -132,9 +247,7 @@ export default function ProfilePage() {
   if (loading) {
     return (
       <UserLayout mode={role} header={{ title: "Mi perfil" }}>
-        <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-6 text-sm text-lll-text-soft">
-          Cargando perfil…
-        </div>
+        <ProfileSkeleton />
       </UserLayout>
     );
   }
@@ -149,6 +262,9 @@ export default function ProfilePage() {
     );
   }
 
+  const roleLabel = isOwner ? "Owner" : "Colaborador";
+  const lockedInputClassName = `${inputClassName} cursor-not-allowed opacity-60`;
+
   return (
     <UserLayout
       mode={role}
@@ -157,233 +273,222 @@ export default function ProfilePage() {
         subtitle: "Datos personales y laborales.",
       }}
     >
-      <div className="max-w-2xl space-y-6">
-        {/* Información básica */}
-        <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4 space-y-4">
-          <p className="text-sm font-semibold">Información básica</p>
-
-          <div>
-            <label className="text-[12px] text-lll-text-soft">Email</label>
-            <input
-              value={profile.email ?? ""}
-              disabled
-              className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border text-sm text-lll-text-soft"
-            />
-          </div>
-
-          {/* Nombre + Apellido (source of truth de UI) */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="text-[12px] text-lll-text-soft">Nombre</label>
-              <input
-                value={firstName}
-                onChange={(e) => setFirstName(e.target.value)}
-                placeholder="Ej: Patricio"
-                className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="text-[12px] text-lll-text-soft">Apellido</label>
-              <input
-                value={lastName}
-                onChange={(e) => setLastName(e.target.value)}
-                placeholder="Ej: Sine"
-                className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm"
-              />
-            </div>
-          </div>
-
-          <div className="text-[12px] text-lll-text-soft">
-            Se mostrará como:{" "}
-            <span className="text-lll-text">{computedFullName ?? "—"}</span>
-          </div>
-
-          <div>
-            <label className="text-[12px] text-lll-text-soft">Equipo</label>
-            <input
-              value={profile.team ?? ""}
-              onChange={(e) => setProfile({ ...profile, team: e.target.value })}
-              placeholder="Ej: Frontend, Diseño, Producto…"
-              className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm"
-            />
-          </div>
-        </div>
-
-        {/* Datos personales */}
-        <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4 space-y-4">
-          <p className="text-sm font-semibold">Datos personales</p>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="text-[12px] text-lll-text-soft">
-                Fecha de nacimiento
-              </label>
-              <input
-                type="date"
-                value={profile.birth_date ?? ""}
-                onChange={(e) =>
-                  setProfile({ ...profile, birth_date: e.target.value })
-                }
-                className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm"
-              />
-              <p className="mt-1 text-[12px] text-lll-text-soft">
-                Edad:{" "}
-                <span className="text-lll-text">
-                  {age === null ? "—" : `${age} años`}
+      <div className="mx-auto max-w-7xl space-y-4">
+        <PageSummary
+          leading={
+            <SummaryIcon>
+              <span className="text-lg font-bold">{initials}</span>
+            </SummaryIcon>
+          }
+          title={computedFullName ?? "Tu perfil"}
+          subtitle={profile.email ?? "Sin email registrado"}
+          meta={
+            <>
+              <SummaryChip>{roleLabel}</SummaryChip>
+              <SummaryChip>{profile.team?.trim() || "Sin equipo"}</SummaryChip>
+            </>
+          }
+          actions={
+            <>
+              {success ? (
+                <span
+                  role="status"
+                  className="text-sm font-medium text-emerald-400"
+                >
+                  Cambios guardados
                 </span>
-              </p>
-            </div>
-
-            <div>
-              <label className="text-[12px] text-lll-text-soft">
-                Grupo sanguíneo
-              </label>
-              <input
-                value={profile.blood_type ?? ""}
-                onChange={(e) =>
-                  setProfile({ ...profile, blood_type: e.target.value })
-                }
-                placeholder="Ej: O+, A-, AB+…"
-                className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="text-[12px] text-lll-text-soft">
-                Contacto de emergencia (Nombre)
-              </label>
-              <input
-                value={profile.emergency_contact_name ?? ""}
-                onChange={(e) =>
-                  setProfile({
-                    ...profile,
-                    emergency_contact_name: e.target.value,
-                  })
-                }
-                placeholder="Ej: Juan Pérez"
-                className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="text-[12px] text-lll-text-soft">
-                Contacto de emergencia (Teléfono)
-              </label>
-              <input
-                value={profile.emergency_contact_phone ?? ""}
-                onChange={(e) =>
-                  setProfile({
-                    ...profile,
-                    emergency_contact_phone: e.target.value,
-                  })
-                }
-                placeholder="Ej: +54 11 5555-5555"
-                className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Datos laborales / RRHH */}
-        <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4 space-y-4">
-          <p className="text-sm font-semibold">Datos laborales</p>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="text-[12px] text-lll-text-soft">
-                Puesto de trabajo
-              </label>
-              <input
-                value={profile.job_title ?? ""}
-                disabled={!isOwner}
-                onChange={(e) =>
-                  setProfile({ ...profile, job_title: e.target.value })
-                }
-                placeholder="Ej: Frontend Developer"
-                className={`mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm ${
-                  !isOwner ? "opacity-60 cursor-not-allowed" : ""
+              ) : null}
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving}
+                className={`min-h-10 rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
+                  saving
+                    ? "cursor-wait border border-lll-border bg-lll-bg-softer text-lll-text-soft"
+                    : "bg-lll-accent text-black hover:brightness-110"
                 }`}
-              />
-              {!isOwner && (
-                <p className="mt-1 text-[12px] text-lll-text-soft">
-                  El puesto lo gestiona RRHH (Owner).
-                </p>
-              )}
-            </div>
+              >
+                {saving ? "Guardando…" : "Guardar cambios"}
+              </button>
+            </>
+          }
+        />
 
-            <div>
-              <label className="text-[12px] text-lll-text-soft">DNI</label>
-              <input
-                value={profile.dni ?? ""}
-                disabled={!isOwner}
-                onChange={(e) => setProfile({ ...profile, dni: e.target.value })}
-                placeholder="Ej: 12345678"
-                className={`mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm ${
-                  !isOwner ? "opacity-60 cursor-not-allowed" : ""
-                }`}
-              />
-              {!isOwner && (
-                <p className="mt-1 text-[12px] text-lll-text-soft">
-                  El DNI lo gestiona RRHH (Owner).
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="text-[12px] text-lll-text-soft">
-                Fecha de ingreso
-              </label>
-              <input
-                type="date"
-                value={profile.start_date ?? ""}
-                disabled={!isOwner}
-                onChange={(e) =>
-                  setProfile({ ...profile, start_date: e.target.value })
-                }
-                className={`mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm ${
-                  !isOwner ? "opacity-60 cursor-not-allowed" : ""
-                }`}
-              />
-              {!isOwner && (
-                <p className="mt-1 text-[12px] text-lll-text-soft">
-                  La fecha de ingreso la gestiona RRHH (Owner).
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Acciones */}
-        <div className="flex items-center gap-3">
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className={`px-4 py-2 rounded-lg font-semibold ${
-              saving
-                ? "bg-lll-bg-softer border border-lll-border text-lll-text-soft"
-                : "bg-lll-accent text-black"
-            }`}
+        {error ? (
+          <div
+            role="alert"
+            className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300"
           >
-            {saving ? "Guardando…" : "Guardar cambios"}
-          </button>
-
-          {success && (
-            <span className="text-sm text-emerald-400">
-              Cambios guardados ✔
-            </span>
-          )}
-        </div>
-
-        {error && (
-          <div className="rounded-xl border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-300">
             {error}
           </div>
-        )}
+        ) : null}
+
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <ProfileSection
+            title="Información básica"
+            description="Cómo te identificamos dentro de LLL Hub."
+          >
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field label="Email">
+                <input
+                  value={profile.email ?? ""}
+                  disabled
+                  className={lockedInputClassName}
+                />
+              </Field>
+
+              <Field label="Equipo">
+                <input
+                  value={profile.team ?? ""}
+                  onChange={(event) =>
+                    setProfile({ ...profile, team: event.target.value })
+                  }
+                  placeholder="Ej: Producto"
+                  className={inputClassName}
+                />
+              </Field>
+
+              <Field label="Nombre">
+                <input
+                  value={firstName}
+                  onChange={(event) => setFirstName(event.target.value)}
+                  placeholder="Ej: Patricio"
+                  className={inputClassName}
+                />
+              </Field>
+
+              <Field label="Apellido">
+                <input
+                  value={lastName}
+                  onChange={(event) => setLastName(event.target.value)}
+                  placeholder="Ej: Sine"
+                  className={inputClassName}
+                />
+              </Field>
+            </div>
+          </ProfileSection>
+
+          <ProfileSection
+            title="Datos personales"
+            description="Información personal y contacto ante una emergencia."
+          >
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <Field
+                label="Fecha de nacimiento"
+                hint={age === null ? "Edad sin calcular" : `${age} años`}
+              >
+                <input
+                  type="date"
+                  value={profile.birth_date ?? ""}
+                  onChange={(event) =>
+                    setProfile({ ...profile, birth_date: event.target.value })
+                  }
+                  className={inputClassName}
+                />
+              </Field>
+
+              <Field label="Grupo sanguíneo">
+                <input
+                  value={profile.blood_type ?? ""}
+                  onChange={(event) =>
+                    setProfile({ ...profile, blood_type: event.target.value })
+                  }
+                  placeholder="Ej: O+"
+                  className={inputClassName}
+                />
+              </Field>
+
+              <Field label="Contacto de emergencia">
+                <input
+                  value={profile.emergency_contact_name ?? ""}
+                  onChange={(event) =>
+                    setProfile({
+                      ...profile,
+                      emergency_contact_name: event.target.value,
+                    })
+                  }
+                  placeholder="Nombre y apellido"
+                  className={inputClassName}
+                />
+              </Field>
+
+              <Field label="Teléfono de emergencia">
+                <input
+                  type="tel"
+                  value={profile.emergency_contact_phone ?? ""}
+                  onChange={(event) =>
+                    setProfile({
+                      ...profile,
+                      emergency_contact_phone: event.target.value,
+                    })
+                  }
+                  placeholder="Ej: +54 11 5555-5555"
+                  className={inputClassName}
+                />
+              </Field>
+            </div>
+          </ProfileSection>
+
+          <ProfileSection
+            title="Datos laborales"
+            description={
+              isOwner
+                ? "Información interna del colaborador."
+                : "Esta información la administra RRHH."
+            }
+            className="xl:col-span-2"
+          >
+            {!isOwner ? (
+              <div className="mb-3 rounded-lg border border-lll-border bg-lll-bg-softer px-3 py-2 text-[12px] text-lll-text-soft">
+                Si necesitás modificar estos datos, contactá a un Owner.
+              </div>
+            ) : null}
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <Field label="Puesto de trabajo">
+                <input
+                  value={profile.job_title ?? ""}
+                  disabled={!isOwner}
+                  onChange={(event) =>
+                    setProfile({ ...profile, job_title: event.target.value })
+                  }
+                  placeholder="Ej: Frontend Developer"
+                  className={
+                    isOwner ? inputClassName : lockedInputClassName
+                  }
+                />
+              </Field>
+
+              <Field label="DNI">
+                <input
+                  value={profile.dni ?? ""}
+                  disabled={!isOwner}
+                  onChange={(event) =>
+                    setProfile({ ...profile, dni: event.target.value })
+                  }
+                  placeholder="Ej: 12345678"
+                  className={
+                    isOwner ? inputClassName : lockedInputClassName
+                  }
+                />
+              </Field>
+
+              <Field label="Fecha de ingreso">
+                <input
+                  type="date"
+                  value={profile.start_date ?? ""}
+                  disabled={!isOwner}
+                  onChange={(event) =>
+                    setProfile({ ...profile, start_date: event.target.value })
+                  }
+                  className={
+                    isOwner ? inputClassName : lockedInputClassName
+                  }
+                />
+              </Field>
+            </div>
+          </ProfileSection>
+        </div>
       </div>
     </UserLayout>
   );

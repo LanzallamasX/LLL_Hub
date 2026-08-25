@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import BalanceDonut from "@/components/balances/BalanceDonut";
 import BalanceBar from "@/components/balances/BalanceBar";
+import BalancesSkeleton from "@/components/balances/BalancesSkeleton";
 
 import { useAbsences } from "@/contexts/AbsencesContext";
 
@@ -14,6 +15,7 @@ import { getAbsenceTypeLabel } from "@/lib/absenceTypes";
 import { supabase } from "@/lib/supabase/client";
 import {
   fetchVacationPolicySettings,
+  getCachedVacationPolicySettings,
   normalizeVacationPolicyMode,
   type VacationPolicyMode,
 } from "@/lib/supabase/vacationPolicy";
@@ -156,6 +158,8 @@ type VacRpc = {
   grantedCurrentPeriod?: number | null;
 };
 
+const ownerVacationBalanceCache = new Map<string, VacRpc>();
+
 export default function BalancesView({
   targetUserId,
   startDateISO,
@@ -165,8 +169,8 @@ export default function BalancesView({
   startDateISO: string | null;
   vacationDaysOverride: number | null;
 }) {
-  const { absences, loadAllAbsences } = useAbsences();
-  const didLoad = useRef(false);
+  const { absences, loadAllAbsences, hasLoadedAllAbsences } = useAbsences();
+  const vacRequestKeyRef = useRef<string | null>(null);
 
   // periodo UI
   const now = new Date();
@@ -178,16 +182,9 @@ export default function BalancesView({
   const [q, setQ] = useState("");
   const [showAll, setShowAll] = useState(false);
 
-  // vacaciones por RPC (owner)
-  const [vacRpc, setVacRpc] = useState<VacRpc | null>(null);
-  const [vacLoading, setVacLoading] = useState(false);
-
   useEffect(() => {
     if (!targetUserId) return;
-    if (!didLoad.current) {
-      didLoad.current = true;
-      loadAllAbsences();
-    }
+    void loadAllAbsences();
   }, [targetUserId, loadAllAbsences]);
 
   const myAbsences = useMemo(() => {
@@ -197,7 +194,9 @@ export default function BalancesView({
 
   // vacAt por URL (si existe)
   const [vacAtFromUrl, setVacAtFromUrl] = useState<string | null>(null);
-  const [vacModel, setVacModel] = useState<VacationPolicyMode>("anniversary");
+  const [vacModel, setVacModel] = useState<VacationPolicyMode>(
+    () => getCachedVacationPolicySettings()?.policy_mode ?? "anniversary"
+  );
 
   useEffect(() => {
     let alive = true;
@@ -239,6 +238,18 @@ export default function BalancesView({
 
   const balanceAsOfISO = useMemo(() => vacAtFromUrl ?? toISODate(new Date()), [vacAtFromUrl]);
 
+  // Conservamos el último balance resuelto para evitar volver al skeleton al navegar.
+  const initialVacRequestKey = `${targetUserId}:${periodAtISO}:${vacModel}`;
+  const [vacRpc, setVacRpc] = useState<VacRpc | null>(
+    () => ownerVacationBalanceCache.get(initialVacRequestKey) ?? null
+  );
+  const [, setVacLoading] = useState(
+    () => !ownerVacationBalanceCache.has(initialVacRequestKey)
+  );
+  const [vacResolved, setVacResolved] = useState(
+    () => ownerVacationBalanceCache.has(initialVacRequestKey)
+  );
+
   // ✅ cupo anual por antigüedad (informativo)
   const vacAnnualEntitlement = useMemo(() => {
     if (!startDateISO) return null;
@@ -253,9 +264,17 @@ export default function BalancesView({
   useEffect(() => {
     if (!targetUserId) return;
 
+    const requestKey = `${targetUserId}:${periodAtISO}:${vacModel}`;
+    if (vacRequestKeyRef.current === requestKey) return;
+    vacRequestKeyRef.current = requestKey;
+
+    const cached = ownerVacationBalanceCache.get(requestKey) ?? null;
+    setVacRpc(cached);
+    setVacResolved(cached !== null);
+
     (async () => {
       try {
-        setVacLoading(true);
+        setVacLoading(cached === null);
 
         const { data, error } =
           vacModel === "october"
@@ -270,7 +289,7 @@ export default function BalancesView({
 
         if (error) throw error;
 
-        setVacRpc({
+        const nextBalance: VacRpc = {
           granted: Number(data?.granted ?? 0),
           used: Number(data?.used ?? 0),
           reserved: Number(data?.reserved ?? 0),
@@ -284,12 +303,15 @@ export default function BalancesView({
             data?.base_available == null ? null : Number(data.base_available),
           grantedCurrentPeriod:
             data?.granted_current_period == null ? null : Number(data.granted_current_period),
-        });
+        };
+        ownerVacationBalanceCache.set(requestKey, nextBalance);
+        setVacRpc(nextBalance);
       } catch (e) {
         console.error("OWNER get_vacation_balance_for_user_at error", e);
-        setVacRpc(null);
+        if (!cached) setVacRpc(null);
       } finally {
         setVacLoading(false);
+        setVacResolved(true);
       }
     })();
   }, [targetUserId, periodAtISO, vacModel]);
@@ -462,6 +484,7 @@ export default function BalancesView({
   }, [selectedKey, statsList]);
 
   const showVacInfo = (key: BalanceKey) => key === "VACATION_DAYS";
+  const balancesReady = hasLoadedAllAbsences && vacResolved;
 
   return (
     <div>
@@ -508,9 +531,6 @@ export default function BalancesView({
                   modelo octubre{vacRpc?.periodLabel ? ` · ${vacRpc.periodLabel}` : ""}
                 </span>
               ) : null}
-              {vacLoading ? (
-                <span className="ml-2 text-lll-text-soft">· (vacaciones cargando…)</span>
-              ) : null}
             </p>
           </div>
 
@@ -534,7 +554,10 @@ export default function BalancesView({
       </div>
 
       {/* Main */}
-      <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
+      {!balancesReady ? (
+        <BalancesSkeleton />
+      ) : (
+      <div className="lll-fade-in mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Left */}
         <div className="lg:col-span-1">
           <div className="rounded-2xl border border-lll-border bg-lll-bg-soft overflow-hidden">
@@ -793,6 +816,7 @@ export default function BalancesView({
           ) : null}
         </div>
       </div>
+      )}
     </div>
   );
 }

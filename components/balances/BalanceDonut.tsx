@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import type { PolicyUnit } from "@/lib/absencePolicies";
+import { Skeleton } from "@/components/ui/Skeleton";
 
 type Props = {
   used: number;
@@ -81,7 +82,10 @@ export default function BalanceDonut({
                 outerRadius={90}
                 paddingAngle={2}
                 stroke="transparent"
-                isAnimationActive={false} // ✅ reduce glitches en resize/hydration
+                isAnimationActive
+                animationBegin={120}
+                animationDuration={900}
+                animationEasing="ease-out"
               >
                 {data.map((_, i) => (
                   <Cell key={i} fill={COLORS[i % COLORS.length]} />
@@ -90,8 +94,10 @@ export default function BalanceDonut({
             </PieChart>
           </ResponsiveContainer>
         ) : (
-          // placeholder mínimo mientras monta
-          <div className="h-full w-full rounded-xl border border-lll-border bg-lll-bg-softer" />
+          <div className="flex h-full w-full items-center justify-center" role="status">
+            <Skeleton className="h-44 w-44 rounded-full" />
+            <span className="sr-only">Preparando gráfico...</span>
+          </div>
         )}
       </div>
 

@@ -8,6 +8,8 @@ import styles from "./LoginExperience.module.css";
 
 type Status = "idle" | "working" | "success" | "error";
 
+const INTRO_WORDMARK = Array.from("LANZALLAMAS");
+
 function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
@@ -122,6 +124,23 @@ export default function LoginExperience() {
 
   return (
     <main className={styles.page}>
+      <div className={styles.introSequence} aria-hidden="true">
+        <div className={styles.introMark}>
+          <div className={styles.introWordmark}>
+            {INTRO_WORDMARK.map((letter, index) => (
+              <span
+                key={`${letter}-${index}`}
+                className={styles.introLetter}
+                style={{ animationDelay: `${100 + index * 52}ms` }}
+              >
+                {letter}
+              </span>
+            ))}
+          </div>
+          <span className={styles.introHub}>HUB</span>
+        </div>
+      </div>
+
       <section className={styles.loginPane} aria-labelledby="login-title">
         <header className={styles.brand}>
           <Image src="/images/logo.svg" alt="Lanzallamas" width={150} height={16} priority />

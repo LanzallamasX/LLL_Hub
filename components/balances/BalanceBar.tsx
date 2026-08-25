@@ -46,7 +46,7 @@ export default function BalanceBar({
   return (
     <div className="mt-3">
       <div className="h-2 w-full overflow-hidden rounded-full bg-lll-bg-softer border border-lll-border">
-        <div className="h-full flex">
+        <div className="lll-progress-reveal h-full flex">
           <div
             className="h-full bg-orange-400/90"
             style={{ width: `${usedP}%` }}

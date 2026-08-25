@@ -21,31 +21,32 @@ import { DEFAULT_VACATION_SETTINGS } from "@/lib/vacations/settings";
 import { findOverlappingAbsence } from "@/lib/absences/overlap";
 
 import DateRangePickerLLL, { type BlockedRange } from "@/components/ui/DateRangePickerLLL";
+import { AppIcon } from "@/components/ui/AppIcon";
+import { usePresence } from "@/components/ui/usePresence";
+import { useBodyScrollLock } from "@/components/ui/useBodyScrollLock";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { countChargeableDays } from "@/lib/vacations/dateCount";
 import { listActiveOwners, type OwnerOption } from "@/lib/supabase/owners";
 
 export type NewAbsencePayload = {
   from: string;
   to: string;
+  /** Fechas sueltas. Cada una se crea como una solicitud independiente. */
+  dates?: string[];
   type: AbsenceTypeId;
   note?: string;
 
   subtype?: LicenseSubtype | null;
   hours?: number | null;
+  timeFrom?: string | null;
+  timeTo?: string | null;
   notifyOwnerIds?: string[];
 };
 
 type Usage = { used: number; reserved?: number; unit: PolicyUnit };
 
 export type VacationInfo = {
-  // compat: mantenemos nombres, pero ahora:
-  // entitlement = acumulado total
-  // usedThisYear = usado total
-  entitlement: number;
-  carryover: number;
-  usedThisYear: number;
   available: number;
-
   accrued: number; // acumulado total (ganado)
   used: number; // pasado aprobado
   reserved: number; // futuro/en curso aprobado
@@ -99,17 +100,17 @@ const LICENSE_SUBTYPES: readonly LicenseSubtype[] = [
 
 function StatBar({ left, right }: { left: React.ReactNode; right?: React.ReactNode }) {
   return (
-    <div className="rounded-2xl bg-blue-500/90 text-white px-4 py-3 text-[13px] leading-5">
+    <div className="rounded-2xl border border-lll-accent-alt/25 bg-gradient-to-r from-lll-accent-alt/15 via-lll-bg-softer to-lll-bg-soft px-4 py-3 text-[13px] leading-5 text-lll-text shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">{left}</div>
-        {right ? <div className="text-white/90">{right}</div> : null}
+        {right ? <div className="text-lll-accent-alt">{right}</div> : null}
       </div>
     </div>
   );
 }
 
 function Sep() {
-  return <span className="mx-1.5 text-white/70">|</span>;
+  return <span className="mx-1.5 text-lll-text-soft/60">|</span>;
 }
 
 function Pill({
@@ -140,6 +141,32 @@ function parseISODate(iso?: string | null) {
   const [y, m, d] = iso.split("-").map(Number);
   if (!y || !m || !d) return null;
   return new Date(y, m - 1, d);
+}
+
+function toLocalISODate(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeTime(value?: string | null) {
+  return value?.match(/^\d{2}:\d{2}/)?.[0] ?? "";
+}
+
+function timeToMinutes(value: string) {
+  if (!/^\d{2}:\d{2}$/.test(value)) return null;
+  const [hours, minutes] = value.split(":").map(Number);
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+
+function formatMinutes(totalMinutes: number) {
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (!hours) return `${minutes} min`;
+  if (!minutes) return `${hours} h`;
+  return `${hours} h ${minutes} min`;
 }
 
 function parseAsOfDate(iso?: string | null) {
@@ -202,8 +229,13 @@ export default function NewAbsenceModal({
     (initial?.subtype as LicenseSubtype | null | undefined) ?? ""
   );
 
-  const [hours, setHours] = useState<string>(
-    initial?.hours != null && Number.isFinite(Number(initial?.hours)) ? String(initial?.hours) : ""
+  const [timeFrom, setTimeFrom] = useState(normalizeTime(initial?.timeFrom));
+  const [timeTo, setTimeTo] = useState(normalizeTime(initial?.timeTo));
+  const [selectedDates, setSelectedDates] = useState<string[]>(
+    initial?.from ? [initial.from] : []
+  );
+  const [vacationDateMode, setVacationDateMode] = useState<"range" | "individual">(
+    "range"
   );
 
   const [submitError, setSubmitError] = useState<string>("");
@@ -212,6 +244,8 @@ export default function NewAbsenceModal({
   const [selectedOwnerIds, setSelectedOwnerIds] = useState<string[]>(initial?.notifyOwnerIds ?? []);
   const [ownersLoading, setOwnersLoading] = useState(false);
   const [ownersLoadError, setOwnersLoadError] = useState(false);
+  const modalPresence = usePresence(open);
+  useBodyScrollLock(modalPresence.shouldRender);
 
   const typeDef = useMemo(() => getAbsenceType(type), [type]);
   const isVacation = type === "vacaciones";
@@ -221,12 +255,36 @@ export default function NewAbsenceModal({
   const policy = useMemo(() => {
     if (isLicense) {
       if (!subtype) return null;
-      return getPolicySafe({ type: "licencia" as any, subtype: subtype as any });
+      return getPolicySafe({ type: "licencia", subtype });
     }
-    return getPolicySafe({ type: type as any, subtype: null });
+    return getPolicySafe({ type, subtype: null });
   }, [type, isLicense, subtype]);
 
   const isHourUnit = policy?.unit === "hour";
+  const timeRange = useMemo(() => {
+    const start = timeToMinutes(timeFrom);
+    const end = timeToMinutes(timeTo);
+    const complete = start != null && end != null;
+    const durationMinutes = complete && end > start ? end - start : 0;
+    return {
+      complete,
+      valid: durationMinutes > 0,
+      durationMinutes,
+      durationHours: durationMinutes / 60,
+    };
+  }, [timeFrom, timeTo]);
+  const usesIndividualDates =
+    !isHourUnit &&
+    (type === "home_office" ||
+      (isVacation && vacationDateMode === "individual"));
+  const individualSelectionMode = ignoreAbsenceId ? "single" : "multiple";
+  const selectedDateObjects = useMemo(
+    () =>
+      selectedDates
+        .map((date) => parseISODate(date))
+        .filter((date): date is Date => date !== null),
+    [selectedDates]
+  );
 
   const blockedRanges: BlockedRange[] = useMemo(() => {
     return (existingAbsences ?? [])
@@ -235,26 +293,32 @@ export default function NewAbsenceModal({
       .map((a) => ({
         from: new Date(a.from + "T00:00:00"),
         to: new Date(a.to + "T00:00:00"),
-        status: a.status,
+        status: a.status === "aprobado" ? "aprobado" : "pendiente",
       }));
   }, [existingAbsences, ignoreAbsenceId]);
 
   const dateRangeOk = useMemo(() => {
+    if (usesIndividualDates) return selectedDates.length > 0;
     if (!from) return false;
     if (isHourUnit) return true;
     if (!to) return false;
     return to >= from;
-  }, [from, to, isHourUnit]);
-
-  useEffect(() => {
-    if (!open) return;
-    if (!isHourUnit) return;
-    if (!from) return;
-    if (to !== from) setTo(from);
-  }, [open, isHourUnit, from, to]);
+  }, [usesIndividualDates, selectedDates.length, from, to, isHourUnit]);
 
   const overlapAbsence = useMemo(() => {
     if (!existingAbsences?.length) return null;
+
+    if (usesIndividualDates) {
+      for (const date of selectedDates) {
+        const overlap = findOverlappingAbsence(existingAbsences, date, date, {
+          ignoreId: ignoreAbsenceId ?? undefined,
+          statuses: ["pendiente", "aprobado"],
+        });
+        if (overlap) return overlap;
+      }
+      return null;
+    }
+
     if (!from) return null;
 
     const rangeFrom = from;
@@ -267,13 +331,22 @@ export default function NewAbsenceModal({
       ignoreId: ignoreAbsenceId ?? undefined,
       statuses: ["pendiente", "aprobado"],
     });
-  }, [existingAbsences, from, to, isHourUnit, ignoreAbsenceId]);
+  }, [
+    existingAbsences,
+    usesIndividualDates,
+    selectedDates,
+    from,
+    to,
+    isHourUnit,
+    ignoreAbsenceId,
+  ]);
 
   const overlapErrorMsg = useMemo(() => {
     if (!overlapAbsence) return "";
     const estado = overlapAbsence.status === "aprobado" ? "aprobada" : "pendiente";
-    return `Ese rango se solapa con una ausencia ${estado} (${overlapAbsence.from} → ${overlapAbsence.to}). Elegí otras fechas.`;
-  }, [overlapAbsence]);
+    const subject = usesIndividualDates ? "Una fecha seleccionada" : "Ese rango";
+    return `${subject} se solapa con una ausencia ${estado} (${overlapAbsence.from} → ${overlapAbsence.to}). Elegí otras fechas.`;
+  }, [overlapAbsence, usesIndividualDates]);
 
   const usage = useMemo(() => {
     if (!policy?.deducts || !policy.deductsFrom) return null;
@@ -290,30 +363,65 @@ export default function NewAbsenceModal({
     if (!usage || usage.allowance == null || usage.available == null) return false;
 
     if (usage.unit === "hour") {
-      const h = Number(hours);
-      if (!Number.isFinite(h) || h <= 0) return false;
-      return h > usage.available;
+      if (!timeRange.valid) return false;
+      return timeRange.durationHours > usage.available;
     }
 
-    if (!from || !to || to < from) return false;
-    const days =
-      policy?.type === "home_office"
-        ? countChargeableDays(from, to, "business_days", holidaysISO)
-        : (() => {
-            const s = new Date(from + "T00:00:00");
-            const e = new Date(to + "T00:00:00");
-            return Math.floor((e.getTime() - s.getTime()) / 86400000) + 1;
-          })();
+    const days = usesIndividualDates
+      ? selectedDates.reduce(
+          (total, date) =>
+            total + countChargeableDays(date, date, "business_days", holidaysISO),
+          0
+        )
+      : from && to && to >= from
+        ? policy?.type === "home_office"
+          ? countChargeableDays(from, to, "business_days", holidaysISO)
+          : (() => {
+              const start = new Date(from + "T00:00:00");
+              const end = new Date(to + "T00:00:00");
+              return Math.floor((end.getTime() - start.getTime()) / 86400000) + 1;
+            })()
+        : 0;
     return days > usage.available;
-  }, [usage, policy?.type, from, to, hours, holidaysISO]);
+  }, [
+    usage,
+    usesIndividualDates,
+    selectedDates,
+    policy?.type,
+    from,
+    to,
+    timeRange,
+    holidaysISO,
+  ]);
 
   const requestedDays = useMemo(() => {
     if (!dateRangeOk) return 0;
     if (!isVacation) return 0;
+    if (usesIndividualDates) {
+      return selectedDates.reduce(
+        (total, date) =>
+          total +
+          countChargeableDays(
+            date,
+            date,
+            DEFAULT_VACATION_SETTINGS.countMode,
+            holidaysISO
+          ),
+        0
+      );
+    }
     if (!from || !to) return 0;
 
     return countChargeableDays(from, to, DEFAULT_VACATION_SETTINGS.countMode, holidaysISO);
-  }, [from, to, dateRangeOk, isVacation, holidaysISO]);
+  }, [
+    from,
+    to,
+    dateRangeOk,
+    isVacation,
+    usesIndividualDates,
+    selectedDates,
+    holidaysISO,
+  ]);
 
   const vacationAvail = useMemo(() => {
     if (typeof vacationInfo?.available === "number") return vacationInfo.available;
@@ -329,9 +437,8 @@ export default function NewAbsenceModal({
 
   const hoursOk = useMemo(() => {
     if (!isHourUnit) return true;
-    const h = Number(hours);
-    return Number.isFinite(h) && h > 0;
-  }, [isHourUnit, hours]);
+    return timeRange.valid;
+  }, [isHourUnit, timeRange.valid]);
 
   const licenseSubtypeOk = useMemo(() => {
     if (!isLicense) return true;
@@ -369,12 +476,22 @@ export default function NewAbsenceModal({
   useEffect(() => {
     if (!open) return;
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Opening or changing the edited request resets the modal form.
     setFrom(initial?.from ?? "");
     setTo(initial?.to ?? "");
     setType((initial?.type as AbsenceTypeId) ?? "vacaciones");
+    setSelectedDates(
+      initial?.dates?.length
+        ? [...initial.dates].sort()
+        : initial?.from
+          ? [initial.from]
+          : []
+    );
+    setVacationDateMode("range");
     setNote(initial?.note ?? "");
     setSubtype((initial?.subtype as LicenseSubtype | null | undefined) ?? "");
-    setHours(initial?.hours != null && Number.isFinite(Number(initial?.hours)) ? String(initial?.hours) : "");
+    setTimeFrom(normalizeTime(initial?.timeFrom));
+    setTimeTo(normalizeTime(initial?.timeTo));
     setSelectedOwnerIds(initial?.notifyOwnerIds ?? []);
 
     setSubmitError("");
@@ -383,10 +500,13 @@ export default function NewAbsenceModal({
     open,
     initial?.from,
     initial?.to,
+    initial?.dates,
     initial?.type,
     initial?.note,
     initial?.subtype,
     initial?.hours,
+    initial?.timeFrom,
+    initial?.timeTo,
     initial?.notifyOwnerIds,
   ]);
 
@@ -395,6 +515,7 @@ export default function NewAbsenceModal({
     if (!showNotificationSelector) return;
 
     let alive = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Loading state belongs to this external owners request.
     setOwnersLoading(true);
     setOwnersLoadError(false);
 
@@ -451,43 +572,53 @@ export default function NewAbsenceModal({
     setSubmitError("");
     setIsSubmitting(true);
 
+    const orderedDates = usesIndividualDates
+      ? [...selectedDates].sort()
+      : undefined;
+    const primaryDate = orderedDates?.[0] ?? from;
+
     const payload: NewAbsencePayload = {
-      from,
-      to: isHourUnit ? from : to,
+      from: primaryDate,
+      to: usesIndividualDates ? primaryDate : isHourUnit ? from : to,
+      dates: orderedDates,
       type,
       note: note.trim() ? note.trim() : undefined,
       subtype: isLicense ? (subtype ? subtype : null) : null,
-      hours: isHourUnit ? Number(hours) : null,
+      hours: isHourUnit ? timeRange.durationHours : null,
+      timeFrom: isHourUnit ? timeFrom : null,
+      timeTo: isHourUnit ? timeTo : null,
       notifyOwnerIds: selectedOwnerIds,
     };
 
     try {
       await onSubmit(payload);
       onClose();
-    } catch (err: any) {
+    } catch (err: unknown) {
       setSubmitError(prettySupabaseError(err));
       setIsSubmitting(false);
     }
   }
 
-  if (!open) return null;
+  if (!modalPresence.shouldRender) return null;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-3 sm:p-4"
+      className="lll-presence-root fixed inset-0 z-50 flex items-center justify-center overflow-hidden p-3 sm:p-4"
+      data-state={modalPresence.state}
       role="dialog"
       aria-modal="true"
+      aria-hidden={!open}
       aria-label={title}
     >
       <button
         type="button"
-        className="absolute inset-0 bg-black/60"
+        className="lll-modal-backdrop absolute inset-0 bg-black/60 backdrop-blur-[2px]"
         onClick={onClose}
         aria-label="Cerrar modal"
       />
 
       <div
-        className="relative my-4 flex w-full max-w-4xl max-h-[calc(100dvh-2rem)] flex-col overflow-hidden rounded-2xl border border-lll-border bg-lll-bg-soft shadow-2xl"
+        className="lll-modal-panel relative flex max-h-[calc(100dvh-1.5rem)] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-lll-border bg-lll-bg-soft shadow-2xl sm:max-h-[calc(100dvh-2rem)]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="shrink-0 px-4 py-3 sm:px-5 sm:py-4 border-b border-lll-border flex items-start justify-between gap-4">
@@ -517,11 +648,11 @@ export default function NewAbsenceModal({
             type="button"
             disabled={isSubmitting}
           >
-            ✕
+            <AppIcon name="close" className="mx-auto h-4 w-4" />
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+        <div className="min-h-0 flex-1 overscroll-contain overflow-y-auto p-4 sm:p-5">
           <div className="mb-4">
             {isVacation ? (
               vacationInfo ? (
@@ -553,7 +684,7 @@ export default function NewAbsenceModal({
                       <span>Pendiente: {fmt2(vacationInfo.pending)} d</span>
                     </>
                   }
-                  right={<span className="text-white/90">Acumulativo · sin vencimiento</span>}
+                  right={<span>Acumulativo · sin vencimiento</span>}
                 />
               ) : vacationAvail != null ? (
                 <StatBar
@@ -578,7 +709,7 @@ export default function NewAbsenceModal({
                       ) : null}
 
                       <Sep />
-                      <span className="text-white/90">Cargando detalle…</span>
+                      <Skeleton className="h-3 w-32 bg-white/20" />
                     </>
                   }
                 />
@@ -607,7 +738,7 @@ export default function NewAbsenceModal({
                       </span>
                     </>
                   }
-                  right={exceedsPolicyAvailable ? <span className="text-white/90">Te pasás del disponible</span> : null}
+                  right={exceedsPolicyAvailable ? <span>Te pasás del disponible</span> : null}
                 />
               </div>
             ) : null}
@@ -616,18 +747,26 @@ export default function NewAbsenceModal({
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <div className="space-y-4">
               <div className="rounded-2xl border border-lll-border bg-lll-bg-softer p-4">
-                <label className="text-[12px] text-lll-text-soft">Tipo</label>
+                <label className="flex items-center gap-2 text-[12px] text-lll-text-soft">
+                  <AppIcon name="absence" className="h-4 w-4 text-lll-accent-alt" />
+                  Tipo de ausencia
+                </label>
                 <select
                   className="mt-2 w-full px-3 py-2 rounded-lg bg-lll-bg-soft border border-lll-border outline-none"
                   value={type}
                   onChange={(e) => {
                     const next = e.target.value as AbsenceTypeId;
                     setType(next);
+                    setFrom("");
+                    setTo("");
+                    setSelectedDates([]);
+                    setVacationDateMode("range");
                     setSubmitError("");
 
                     if (next !== "licencia") {
                       setSubtype("");
-                      setHours("");
+                      setTimeFrom("");
+                      setTimeTo("");
                     }
                   }}
                 >
@@ -645,15 +784,19 @@ export default function NewAbsenceModal({
                       className="mt-2 w-full px-3 py-2 rounded-lg bg-lll-bg-soft border border-lll-border outline-none"
                       value={subtype}
                       onChange={(e) => {
-                        setSubtype(e.target.value as any);
-                        setHours("");
+                        setSubtype(e.target.value as LicenseSubtype);
+                        setFrom("");
+                        setTo("");
+                        setSelectedDates([]);
+                        setTimeFrom("");
+                        setTimeTo("");
                         setSubmitError("");
                       }}
                     >
                       <option value="">Seleccionar…</option>
                       {LICENSE_SUBTYPES.map((s) => (
                         <option key={s} value={s}>
-                          {getLicenseSubtypeLabel(s as any)}
+                          {getLicenseSubtypeLabel(s)}
                         </option>
                       ))}
                     </select>
@@ -666,57 +809,183 @@ export default function NewAbsenceModal({
               </div>
 
               <div className="rounded-2xl border border-lll-border bg-lll-bg-softer p-4">
+                <div className="mb-2 flex items-center gap-2 text-[12px] text-lll-text-soft">
+                  <AppIcon name="calendar" className="h-4 w-4 text-lll-accent-alt" />
+                  {isHourUnit
+                    ? "Día y horario"
+                    : usesIndividualDates
+                      ? "Días seleccionados"
+                      : "Rango de fechas"}
+                </div>
                 {isHourUnit ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-[12px] text-lll-text-soft">Fecha</label>
-                      <input
-                        className="mt-2 w-full px-3 py-2 rounded-lg bg-lll-bg-soft border border-lll-border outline-none"
-                        type="date"
-                        value={from}
-                        onChange={(e) => {
-                          setFrom(e.target.value);
-                          setSubmitError("");
-                        }}
-                      />
-                    </div>
+                  <div className="space-y-3">
+                    <DateRangePickerLLL
+                      holidaysISO={holidaysISO}
+                      blockedRanges={blockedRanges}
+                      selectionMode="single"
+                      selectedDates={from ? [new Date(from + "T00:00:00")] : []}
+                      onSelectedDatesChange={(dates) => {
+                        const date = dates[0] ? toLocalISODate(dates[0]) : "";
+                        setFrom(date);
+                        setTo(date);
+                        setSubmitError("");
+                      }}
+                      value={{
+                        from: from ? new Date(from + "T00:00:00") : undefined,
+                        to: from ? new Date(from + "T00:00:00") : undefined,
+                      }}
+                      onChange={(next) => {
+                        const date = next.from ? toLocalISODate(next.from) : "";
+                        setFrom(date);
+                        setTo(date);
+                        setSubmitError("");
+                      }}
+                      label="Día de la solicitud"
+                    />
 
-                    <div>
-                      <label className="text-[12px] text-lll-text-soft">Horas</label>
-                      <input
-                        className="mt-2 w-full px-3 py-2 rounded-lg bg-lll-bg-soft border border-lll-border outline-none"
-                        type="number"
-                        min={0}
-                        step={0.5}
-                        value={hours}
-                        onChange={(e) => {
-                          setHours(e.target.value);
-                          setSubmitError("");
-                        }}
-                        placeholder="Ej: 6"
-                      />
-                      {!hoursOk ? (
-                        <p className="mt-2 text-[12px] text-red-300">Ingresá horas válidas (mayor a 0).</p>
+                    <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-3">
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-end">
+                        <label className="text-[11px] text-lll-text-soft">
+                          Desde
+                          <input
+                            className="mt-1.5 w-full rounded-xl border border-lll-border bg-lll-bg-softer px-3 py-2.5 text-sm text-lll-text outline-none focus:border-lll-accent-alt/50"
+                            type="time"
+                            step={900}
+                            value={timeFrom}
+                            onChange={(e) => {
+                              setTimeFrom(e.target.value);
+                              setSubmitError("");
+                            }}
+                          />
+                        </label>
+
+                        <span className="hidden pb-3 text-lll-text-soft sm:block" aria-hidden="true">
+                          →
+                        </span>
+
+                        <label className="text-[11px] text-lll-text-soft">
+                          Hasta
+                          <input
+                            className="mt-1.5 w-full rounded-xl border border-lll-border bg-lll-bg-softer px-3 py-2.5 text-sm text-lll-text outline-none focus:border-lll-accent-alt/50"
+                            type="time"
+                            step={900}
+                            min={timeFrom || undefined}
+                            value={timeTo}
+                            onChange={(e) => {
+                              setTimeTo(e.target.value);
+                              setSubmitError("");
+                            }}
+                          />
+                        </label>
+                      </div>
+
+                      {timeRange.valid ? (
+                        <div className="mt-3 flex items-center justify-between gap-3 rounded-xl border border-lll-accent-alt/20 bg-lll-accent-alt/[0.07] px-3 py-2 text-[11px]">
+                          <span className="text-lll-text-soft">Duración calculada</span>
+                          <span className="font-semibold text-lll-accent-alt">
+                            {formatMinutes(timeRange.durationMinutes)}
+                          </span>
+                        </div>
+                      ) : timeRange.complete ? (
+                        <p className="mt-2 text-[11px] text-red-300">
+                          El horario de finalización debe ser posterior al de inicio.
+                        </p>
+                      ) : (
+                        <p className="mt-2 text-[11px] text-lll-text-soft">
+                          Elegí el horario de inicio y finalización; las horas se calculan automáticamente.
+                        </p>
+                      )}
+
+                      {!timeFrom && !timeTo && initial?.hours ? (
+                        <p className="mt-2 text-[11px] text-amber-200">
+                          Esta solicitud anterior tiene {initial.hours} h registradas, pero no conserva el horario exacto.
+                        </p>
                       ) : null}
                     </div>
                   </div>
                 ) : (
                   <div>
+                    {isVacation && !ignoreAbsenceId ? (
+                      <div className="mb-3 grid grid-cols-2 gap-1 rounded-xl border border-lll-border bg-lll-bg-soft p-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (vacationDateMode === "range") return;
+                            setVacationDateMode("range");
+                            setFrom("");
+                            setTo("");
+                            setSelectedDates([]);
+                            setSubmitError("");
+                          }}
+                          className={`rounded-lg px-3 py-2 text-[11px] font-medium transition ${
+                            vacationDateMode === "range"
+                              ? "bg-lll-accent-alt/15 text-lll-text ring-1 ring-lll-accent-alt/35"
+                              : "text-lll-text-soft hover:text-lll-text"
+                          }`}
+                        >
+                          Período continuo
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (vacationDateMode === "individual") return;
+                            setVacationDateMode("individual");
+                            setFrom("");
+                            setTo("");
+                            setSelectedDates([]);
+                            setSubmitError("");
+                          }}
+                          className={`rounded-lg px-3 py-2 text-[11px] font-medium transition ${
+                            vacationDateMode === "individual"
+                              ? "bg-lll-accent-alt/15 text-lll-text ring-1 ring-lll-accent-alt/35"
+                              : "text-lll-text-soft hover:text-lll-text"
+                          }`}
+                        >
+                          Días sueltos
+                        </button>
+                      </div>
+                    ) : null}
+
+                    {type === "home_office" ? (
+                      <div className="mb-3 rounded-xl border border-lll-accent-alt/20 bg-lll-accent-alt/[0.07] px-3 py-2 text-[11px] leading-5 text-lll-text-soft">
+                        Elegí días sueltos. Si marcás martes y jueves, el miércoles no se incluye.
+                      </div>
+                    ) : null}
+
                     <div className="mt-2">
                       <DateRangePickerLLL
                         holidaysISO={holidaysISO}
                         blockedRanges={blockedRanges}
+                        selectionMode={
+                          usesIndividualDates ? individualSelectionMode : "range"
+                        }
+                        selectedDates={selectedDateObjects}
+                        onSelectedDatesChange={(dates) => {
+                          const isoDates = dates.map(toLocalISODate).sort();
+                          setSelectedDates(isoDates);
+                          if (ignoreAbsenceId) {
+                            setFrom(isoDates[0] ?? "");
+                            setTo(isoDates[0] ?? "");
+                          }
+                          setSubmitError("");
+                        }}
+                        maxSelectedDates={31}
                         value={{
                           from: from ? new Date(from + "T00:00:00") : undefined,
                           to: to ? new Date(to + "T00:00:00") : undefined,
                         }}
                         onChange={(next) => {
-                          const f = next.from ? next.from.toISOString().slice(0, 10) : "";
-                          const t = next.to ? next.to.toISOString().slice(0, 10) : "";
+                          const f = next.from ? toLocalISODate(next.from) : "";
+                          const t = next.to ? toLocalISODate(next.to) : "";
                           setFrom(f);
                           setTo(t);
                           setSubmitError("");
                         }}
+                        label={
+                          usesIndividualDates
+                            ? "Selección individual"
+                            : "Período continuo"
+                        }
                       />
                     </div>
                   </div>
@@ -726,7 +995,10 @@ export default function NewAbsenceModal({
 
             <div className="space-y-4">
               <div className="rounded-2xl border border-lll-border bg-lll-bg-softer p-4">
-                <label className="text-[12px] text-lll-text-soft">Comentario</label>
+                <label className="flex items-center gap-2 text-[12px] text-lll-text-soft">
+                  <AppIcon name="note" className="h-4 w-4 text-lll-accent-alt" />
+                  Comentario
+                </label>
                 <textarea
                   className="mt-2 w-full px-3 py-2 rounded-lg bg-lll-bg-soft border border-lll-border outline-none min-h-[120px] lg:min-h-[160px] xl:min-h-[220px] resize-y"
                   placeholder="Opcional..."
@@ -742,7 +1014,10 @@ export default function NewAbsenceModal({
               {showNotificationSelector ? (
               <div className="rounded-2xl border border-lll-border bg-lll-bg-softer p-4">
                 <div className="flex items-center justify-between gap-3">
-                  <label className="text-[12px] text-lll-text-soft">Notificar a</label>
+                  <label className="flex items-center gap-2 text-[12px] text-lll-text-soft">
+                    <AppIcon name="users" className="h-4 w-4 text-lll-accent-alt" />
+                    Notificar a
+                  </label>
                   {selectedOwnerIds.length > 0 ? (
                     <button
                       type="button"
@@ -757,7 +1032,9 @@ export default function NewAbsenceModal({
 
                 <div className="mt-3 flex flex-wrap gap-2">
                   {ownersLoading ? (
-                    <span className="text-[12px] text-lll-text-soft">Cargando...</span>
+                    [0, 1, 2].map((item) => (
+                      <Skeleton key={item} className="h-8 w-28 rounded-full" />
+                    ))
                   ) : ownersLoadError ? (
                     <span className="text-[12px] text-amber-300">No se pudieron cargar owners.</span>
                   ) : ownerOptions.length === 0 ? (
@@ -809,6 +1086,7 @@ export default function NewAbsenceModal({
                     type="button"
                     disabled={isSubmitting}
                   >
+                    <AppIcon name="close" className="mr-1 inline h-4 w-4" />
                     Cancelar
                   </button>
 
@@ -822,7 +1100,14 @@ export default function NewAbsenceModal({
                     }`}
                     type="button"
                   >
-                    {isSubmitting ? "Enviando..." : submitLabel}
+                    <AppIcon name={isSubmitting ? "clock" : "check"} className="mr-1 inline h-4 w-4" />
+                    {isSubmitting
+                      ? "Enviando..."
+                      : usesIndividualDates &&
+                          selectedDates.length > 1 &&
+                          !ignoreAbsenceId
+                        ? `Enviar ${selectedDates.length} solicitudes`
+                        : submitLabel}
                   </button>
                 </div>
               </div>

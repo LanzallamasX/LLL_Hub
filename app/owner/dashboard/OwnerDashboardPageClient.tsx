@@ -1,14 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 import UserLayout from "@/components/layout/UserLayout";
+import { AppIcon } from "@/components/ui/AppIcon";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { ListSkeleton } from "@/components/ui/LoadingSkeletons";
+import {
+  PageSummary,
+  SummaryChip,
+  SummaryIcon,
+} from "@/components/ui/PageSummary";
+import { SearchField } from "@/components/ui/SearchField";
+import { SectionCard } from "@/components/ui/SectionCard";
 import AbsenceConversation from "@/components/dashboard/AbsenceConversation";
 import { useAbsences } from "@/contexts/AbsencesContext";
 import { useAuth } from "@/contexts/AuthContext";
 
 import { getAbsenceTypeLabel } from "@/lib/absenceTypes";
+import { getAbsenceTimeRangeLabel } from "@/lib/absences/timeRange";
 import { formatAR, formatARDateTime } from "@/lib/date";
 
 type AbsenceStatus = "pendiente" | "aprobado" | "rechazado";
@@ -38,14 +49,18 @@ export default function OwnerDashboardPageClient() {
   const searchParams = useSearchParams();
 
   const { userId, isAuthed, role, isLoading } = useAuth();
-  const { absences, pendingCount, loadAllAbsences, setAbsenceStatus } =
-    useAbsences();
+  const {
+    absences,
+    pendingCount,
+    loadAllAbsences,
+    hasLoadedAllAbsences,
+    setAbsenceStatus,
+  } = useAbsences();
 
   const [filter, setFilter] = useState<"pendiente" | "todas">("pendiente");
   const [query, setQuery] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
-
-  const didLoad = useRef(false);
+  const contentLoaded = hasLoadedAllAbsences;
 
   const focusId = searchParams.get("focus");
   const vacAtParam = searchParams.get("vacAt"); // YYYY-MM-DD
@@ -75,11 +90,8 @@ export default function OwnerDashboardPageClient() {
   }, [isLoading, isAuthed, userId, role, router]);
 
   useEffect(() => {
-    if (didLoad.current) return;
-
     if (!isLoading && isAuthed && userId && role === "owner") {
-      didLoad.current = true;
-      loadAllAbsences();
+      void loadAllAbsences();
     }
   }, [isLoading, isAuthed, userId, role, loadAllAbsences]);
 
@@ -100,6 +112,14 @@ export default function OwnerDashboardPageClient() {
 
     return [...items].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [absences, filter, query]);
+
+  const statusCounts = useMemo(
+    () => ({
+      approved: absences.filter((absence) => absence.status === "aprobado").length,
+      rejected: absences.filter((absence) => absence.status === "rechazado").length,
+    }),
+    [absences]
+  );
 
   useEffect(() => {
     if (!focusId) return;
@@ -162,79 +182,116 @@ export default function OwnerDashboardPageClient() {
   }
 
   return (
-    <UserLayout mode="owner">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-[clamp(1.5rem,5vw,1.875rem)] font-semibold leading-tight">Solicitudes del equipo</h1>
-          <p className="mt-1 text-sm text-lll-text-soft">
-            Revisá y gestioná las solicitudes.
-          </p>
+    <UserLayout
+      mode="owner"
+      header={{
+        title: "Solicitudes",
+        subtitle: "Revisión y gestión de ausencias del equipo.",
+      }}
+    >
+      <div className="mx-auto max-w-7xl space-y-4">
+        <PageSummary
+          leading={
+            <SummaryIcon tone="text-orange-300">
+              <AppIcon name="absence" className="h-7 w-7" />
+            </SummaryIcon>
+          }
+          title="Solicitudes del equipo"
+          subtitle="Revisá, aprobá y acompañá cada solicitud desde una sola vista."
+          meta={
+            contentLoaded ? (
+              <>
+                <SummaryChip>{pendingCount} pendientes</SummaryChip>
+                <SummaryChip>{statusCounts.approved} aprobadas</SummaryChip>
+                <SummaryChip>{statusCounts.rejected} rechazadas</SummaryChip>
+              </>
+            ) : (
+              <SummaryChip>Cargando solicitudes…</SummaryChip>
+            )
+          }
+          actions={
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setFilter("pendiente")}
+                className={`inline-flex min-h-10 items-center gap-2 rounded-lg border px-3 py-2 text-sm transition ${
+                  filter === "pendiente"
+                    ? "border-lll-accent/50 bg-lll-accent-soft text-lll-text"
+                    : "border-lll-border bg-lll-bg-softer text-lll-text-soft hover:text-lll-text"
+                }`}
+                type="button"
+              >
+                <AppIcon name="clock" className="h-4 w-4" />
+                Pendientes
+              </button>
 
-          {vacAt ? (
-            <p className="mt-1 text-[12px] text-amber-300">
-              Modo test activo: simulando vacaciones al {vacAt}
-            </p>
-          ) : null}
-        </div>
+              <button
+                onClick={() => setFilter("todas")}
+                className={`inline-flex min-h-10 items-center gap-2 rounded-lg border px-3 py-2 text-sm transition ${
+                  filter === "todas"
+                    ? "border-lll-accent/50 bg-lll-accent-soft text-lll-text"
+                    : "border-lll-border bg-lll-bg-softer text-lll-text-soft hover:text-lll-text"
+                }`}
+                type="button"
+              >
+                <AppIcon name="filter" className="h-4 w-4" />
+                Todas
+              </button>
+            </div>
+          }
+        />
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setFilter("pendiente")}
-            className={`px-3 py-2 rounded-lg text-sm border ${
-              filter === "pendiente"
-                ? "bg-lll-accent-soft border-lll-accent/50 text-lll-text"
-                : "bg-lll-bg-soft border-lll-border text-lll-text-soft"
-            }`}
-            type="button"
-          >
-            Pendientes ({pendingCount})
-          </button>
-
-          <button
-            onClick={() => setFilter("todas")}
-            className={`px-3 py-2 rounded-lg text-sm border ${
-              filter === "todas"
-                ? "bg-lll-accent-soft border-lll-accent/50 text-lll-text"
-                : "bg-lll-bg-soft border-lll-border text-lll-text-soft"
-            }`}
-            type="button"
-          >
-            Todas
-          </button>
-        </div>
-      </div>
-
-      <div className="mt-6 rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
-        <div className="flex flex-col md:flex-row gap-3 md:items-center md:justify-between">
-          <div>
-            <p className="text-sm font-semibold">Buscar colaborador</p>
-            <p className="text-[12px] text-lll-text-soft">
-              Filtrá por nombre para encontrar solicitudes rápido.
-            </p>
+        {vacAt ? (
+          <div className="flex items-center gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-3 text-[12px] text-amber-200">
+            <AppIcon name="info" className="h-4 w-4 shrink-0" />
+            Modo test activo: simulando vacaciones al {vacAt}
           </div>
+        ) : null}
 
-          <div className="w-full md:w-[340px]">
-            <input
+        <SectionCard
+          title="Buscar colaborador"
+          description={`${visibleItems.length} solicitud${visibleItems.length === 1 ? "" : "es"} visible${visibleItems.length === 1 ? "" : "s"}.`}
+          icon={<AppIcon name="search" className="h-4 w-4" />}
+          action={
+            <SearchField
+              className="w-[min(380px,42vw)] max-w-full"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm"
-              placeholder="Ej: Patricio, Juan..."
-              type="text"
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Buscar por nombre…"
             />
-          </div>
-        </div>
-      </div>
+          }
+        >
+          <p className="text-[12px] text-lll-text-soft">
+            El filtro se aplica sobre las solicitudes del estado seleccionado.
+          </p>
+        </SectionCard>
 
-      <div className="mt-6 space-y-4">
-        {visibleItems.length === 0 && (
-          <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-6 text-sm text-lll-text-soft">
-            No hay solicitudes para mostrar.
+        <div className="space-y-4">
+        {!contentLoaded ? (
+          <div className="overflow-hidden rounded-2xl border border-lll-border bg-lll-bg-soft">
+            <ListSkeleton rows={6} />
+          </div>
+        ) : null}
+
+        {contentLoaded && visibleItems.length === 0 && (
+          <div className="rounded-2xl border border-lll-border bg-lll-bg-soft">
+            <EmptyState
+              icon={<AppIcon name="absence" className="h-5 w-5" />}
+              title="No hay solicitudes para mostrar"
+              description="Probá cambiando el filtro o la búsqueda seleccionada."
+            />
           </div>
         )}
 
-        {visibleItems.map((a) => {
+        {contentLoaded && visibleItems.map((a) => {
           const s = statusUI(a.status as AbsenceStatus);
           const isBusy = busyId === a.id;
+          const timeRangeLabel = getAbsenceTimeRangeLabel(a);
+          const initials = (a.userName || "Usuario")
+            .split(/\s+/)
+            .filter(Boolean)
+            .slice(0, 2)
+            .map((part) => part[0]?.toUpperCase())
+            .join("");
 
           return (
             <div
@@ -247,53 +304,71 @@ export default function OwnerDashboardPageClient() {
               }`}
             >
               <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="flex items-start gap-3 flex-wrap">
-                    <p className="font-semibold truncate">{a.userName}</p>
-
-                    <span
-                      className={`inline-flex items-center px-2.5 py-1 rounded-full border text-[12px] font-semibold ${s.badge}`}
-                    >
-                      {s.label}
-                    </span>
+                <div className="flex min-w-0 items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-lll-border bg-lll-bg-softer text-xs font-semibold text-lll-accent-alt">
+                    {initials}
                   </div>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-start gap-3">
+                      <p className="truncate font-semibold">{a.userName}</p>
 
-                  <p className="mt-1 text-sm text-lll-text-soft">
-                    {getAbsenceTypeLabel(a.type, a.subtype ?? null)} · {formatAR(a.from)} →{" "}
-                    {formatAR(a.to)}
-                  </p>
-
-                  {a.note && (
-                    <p className="mt-1 text-[12px] text-lll-text-soft">
-                      “{a.note}”
-                    </p>
-                  )}
-
-                  <p className="mt-2 text-[12px] text-lll-text-soft">
-                    Creada:{" "}
-                    <span className="text-lll-text">
-                      {formatARDateTime(a.createdAt)}
-                    </span>
-                  </p>
-
-                  {a.status !== "pendiente" && a.decidedAt ? (
-                    <p className="mt-1 text-[12px] text-lll-text-soft">
-                      Resuelto{" "}
-                      {a.decidedByProfile?.fullName || a.decidedByProfile?.email ? (
-                        <>
-                          por{" "}
-                          <span className="text-lll-text">
-                            {a.decidedByProfile.fullName ??
-                              a.decidedByProfile.email}
-                          </span>{" "}
-                        </>
-                      ) : null}
-                      el{" "}
-                      <span className="text-lll-text">
-                        {formatARDateTime(a.decidedAt)}
+                      <span
+                        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-semibold ${s.badge}`}
+                      >
+                        <AppIcon
+                          name={
+                            a.status === "pendiente"
+                              ? "clock"
+                              : a.status === "aprobado"
+                                ? "check"
+                                : "close"
+                          }
+                          className="h-3.5 w-3.5"
+                        />
+                        {s.label}
                       </span>
+                    </div>
+
+                    <p className="mt-1 flex items-center gap-2 text-sm text-lll-text-soft">
+                      <AppIcon name="calendar" className="h-4 w-4 shrink-0" />
+                      {getAbsenceTypeLabel(a.type, a.subtype ?? null)} · {formatAR(a.from)} →{" "}
+                      {formatAR(a.to)}
                     </p>
-                  ) : null}
+
+                    {timeRangeLabel ? (
+                      <p className="mt-1 flex items-center gap-2 text-[12px] text-lll-text-soft">
+                        <AppIcon name="clock" className="h-3.5 w-3.5 shrink-0" />
+                        <span className="text-lll-text">{timeRangeLabel}</span>
+                      </p>
+                    ) : null}
+
+                    {a.note && (
+                      <p className="mt-1 flex items-start gap-2 text-[12px] text-lll-text-soft">
+                        <AppIcon name="note" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        “{a.note}”
+                      </p>
+                    )}
+
+                    <p className="mt-2 flex items-center gap-2 text-[12px] text-lll-text-soft">
+                      <AppIcon name="clock" className="h-3.5 w-3.5 shrink-0" />
+                      Creada: <span className="text-lll-text">{formatARDateTime(a.createdAt)}</span>
+                    </p>
+
+                    {a.status !== "pendiente" && a.decidedAt ? (
+                      <p className="mt-1 text-[12px] text-lll-text-soft">
+                        Resuelto{" "}
+                        {a.decidedByProfile?.fullName || a.decidedByProfile?.email ? (
+                          <>
+                            por{" "}
+                            <span className="text-lll-text">
+                              {a.decidedByProfile.fullName ?? a.decidedByProfile.email}
+                            </span>{" "}
+                          </>
+                        ) : null}
+                        el <span className="text-lll-text">{formatARDateTime(a.decidedAt)}</span>
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -311,6 +386,7 @@ export default function OwnerDashboardPageClient() {
                         }`}
                         type="button"
                       >
+                        <AppIcon name="check" className="mr-1 inline h-4 w-4" />
                         Aprobar
                       </button>
 
@@ -326,6 +402,7 @@ export default function OwnerDashboardPageClient() {
                         }`}
                         type="button"
                       >
+                        <AppIcon name="close" className="mr-1 inline h-4 w-4" />
                         Rechazar
                       </button>
                     </div>
@@ -351,6 +428,7 @@ export default function OwnerDashboardPageClient() {
                         }`}
                         type="button"
                       >
+                        <AppIcon name="clock" className="mr-1 inline h-4 w-4" />
                         Marcar pendiente
                       </button>
                     </div>
@@ -362,6 +440,7 @@ export default function OwnerDashboardPageClient() {
             </div>
           );
         })}
+        </div>
       </div>
     </UserLayout>
   );

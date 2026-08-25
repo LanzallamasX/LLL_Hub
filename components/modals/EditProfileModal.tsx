@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import type { ProfileRole, ProfileRow } from "@/lib/supabase/profilesAdmin";
+import { usePresence } from "@/components/ui/usePresence";
 
 export type EditProfilePayload = {
   // identidad
@@ -139,6 +140,7 @@ export default function EditProfileModal({
   // UI state
   const [saving, setSaving] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const modalPresence = usePresence(open);
 
   const computedFullName = useMemo(() => {
     const v = `${firstName} ${lastName}`.trim();
@@ -265,7 +267,7 @@ export default function EditProfileModal({
     vacAvailableAtMigration,
   ]);
 
-  if (!open) return null;
+  if (!modalPresence.shouldRender) return null;
 
   async function handleSave() {
     if (!user) return;
@@ -340,14 +342,22 @@ export default function EditProfileModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
+      className="lll-presence-root fixed inset-0 z-50 flex items-center justify-center p-4"
+      data-state={modalPresence.state}
       role="dialog"
       aria-modal="true"
+      aria-hidden={!open}
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="w-full max-w-3xl rounded-2xl border border-lll-border bg-lll-bg-soft overflow-hidden shadow-2xl">
+      <button
+        type="button"
+        className="lll-modal-backdrop absolute inset-0 bg-black/60 backdrop-blur-[2px]"
+        onClick={onClose}
+        aria-label="Cerrar modal"
+      />
+      <div className="lll-modal-panel relative w-full max-w-3xl rounded-2xl border border-lll-border bg-lll-bg-soft overflow-hidden shadow-2xl">
         {/* Header */}
         <div className="p-4 border-b border-lll-border flex items-start justify-between gap-3">
           <div className="min-w-0">

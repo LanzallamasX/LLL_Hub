@@ -6,6 +6,17 @@ import { useRouter } from "next/navigation";
 import UserLayout from "@/components/layout/UserLayout";
 import BalanceDonut from "@/components/balances/BalanceDonut";
 import BalanceBar from "@/components/balances/BalanceBar";
+import BalancesSkeleton from "@/components/balances/BalancesSkeleton";
+import { AppIcon } from "@/components/ui/AppIcon";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { FormField, formControlClassName } from "@/components/ui/FormField";
+import {
+  PageSummary,
+  SummaryChip,
+  SummaryIcon,
+} from "@/components/ui/PageSummary";
+import { SearchField } from "@/components/ui/SearchField";
+import { SectionCard } from "@/components/ui/SectionCard";
 
 import { useAbsences } from "@/contexts/AbsencesContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -17,6 +28,7 @@ import { getAbsenceTypeLabel } from "@/lib/absenceTypes";
 import { supabase } from "@/lib/supabase/client";
 import {
   fetchVacationPolicySettings,
+  getCachedVacationPolicySettings,
   normalizeVacationPolicyMode,
   type VacationPolicyMode,
 } from "@/lib/supabase/vacationPolicy";
@@ -37,9 +49,9 @@ function downloadCSV(filename: string, csv: string) {
   URL.revokeObjectURL(url);
 }
 
-function toCSV(rows: any[]) {
-  const esc = (v: any) => {
-    const s = String(v ?? "");
+function toCSV(rows: Record<string, unknown>[]) {
+  const esc = (value: unknown) => {
+    const s = String(value ?? "");
     if (s.includes('"') || s.includes(",") || s.includes("\n")) return `"${s.replace(/"/g, '""')}"`;
     return s;
   };
@@ -75,6 +87,16 @@ type StatRow = {
   available: number | null;
 };
 
+type SelfVacationBalance = {
+  granted: number;
+  used: number;
+  reserved: number;
+  reservedPending: number;
+  available: number;
+};
+
+const selfVacationBalanceCache = new Map<string, SelfVacationBalance>();
+
 type BalancePeriod = number | "toDate" | "all";
 
 function cutoffForYear(year: number) {
@@ -102,9 +124,10 @@ function visibleMonthIndexes(year: number) {
 export default function BalancesPage() {
   const router = useRouter();
   const { userId, isAuthed, isLoading } = useAuth();
-  const { absences, loadMyAbsences } = useAbsences();
+  const { absences, loadMyAbsences, hasLoadedMyAbsences } = useAbsences();
 
-  const didLoad = useRef(false);
+  const vacRequestKeyRef = useRef<string | null>(null);
+  const absencesLoaded = userId ? hasLoadedMyAbsences(userId) : false;
 
   useEffect(() => {
     if (isLoading) return;
@@ -112,10 +135,7 @@ export default function BalancesPage() {
       router.replace("/login");
       return;
     }
-    if (!didLoad.current) {
-      didLoad.current = true;
-      loadMyAbsences(userId);
-    }
+    void loadMyAbsences(userId);
   }, [isLoading, isAuthed, userId, router, loadMyAbsences]);
 
   const now = new Date();
@@ -160,7 +180,13 @@ export default function BalancesPage() {
 
   // ✅ vacAt desde URL (para testear): /balances?vacAt=YYYY-MM-DD
   const [vacAtFromUrl, setVacAtFromUrl] = useState<string | null>(null);
-  const [vacModel, setVacModel] = useState<VacationPolicyMode>("anniversary");
+  const cachedVacationPolicy = getCachedVacationPolicySettings();
+  const [vacModel, setVacModel] = useState<VacationPolicyMode>(
+    cachedVacationPolicy?.policy_mode ?? "anniversary"
+  );
+  const [vacModelReady, setVacModelReady] = useState(
+    cachedVacationPolicy !== null
+  );
 
   useEffect(() => {
     if (!isAuthed) return;
@@ -176,16 +202,25 @@ export default function BalancesPage() {
       setVacAtFromUrl(at || null);
 
       if (v === "october" || v === "anniversary") {
-        setVacModel(normalizeVacationPolicyMode(v));
+        if (alive) {
+          setVacModel(normalizeVacationPolicyMode(v));
+          setVacModelReady(true);
+        }
         return;
       }
 
       try {
         const policy = await fetchVacationPolicySettings();
-        if (alive) setVacModel(policy.policy_mode);
+        if (alive) {
+          setVacModel(policy.policy_mode);
+          setVacModelReady(true);
+        }
       } catch (e) {
         console.error("fetchVacationPolicySettings error", e);
-        if (alive) setVacModel("anniversary");
+        if (alive) {
+          setVacModel("anniversary");
+          setVacModelReady(true);
+        }
       }
     })();
 
@@ -205,19 +240,31 @@ export default function BalancesPage() {
   const balanceAsOfISO = useMemo(() => vacAtFromUrl ?? toISODate(new Date()), [vacAtFromUrl]);
 
   // ✅ balance vacaciones REAL (RPC) para que respete migración + acumulado
-  const [vacRpc, setVacRpc] = useState<{
-    granted: number;
-    used: number;
-    reserved: number;
-    reservedPending: number;
-    available: number;
-  } | null>(null);
+  const initialVacRequestKey = `${userId ?? "anonymous"}:${periodAtISO}:${vacModel}`;
+  const [vacRpc, setVacRpc] = useState<SelfVacationBalance | null>(
+    () => selfVacationBalanceCache.get(initialVacRequestKey) ?? null
+  );
+  const [vacRpcLoading, setVacRpcLoading] = useState(
+    () => !selfVacationBalanceCache.has(initialVacRequestKey)
+  );
+  const [vacRpcResolved, setVacRpcResolved] = useState(
+    () => selfVacationBalanceCache.has(initialVacRequestKey)
+  );
 
   useEffect(() => {
-    if (!isAuthed || !userId) return;
+    if (!isAuthed || !userId || !vacModelReady) return;
+
+    const requestKey = `${userId}:${periodAtISO}:${vacModel}`;
+    if (vacRequestKeyRef.current === requestKey) return;
+    vacRequestKeyRef.current = requestKey;
+
+    const cached = selfVacationBalanceCache.get(requestKey) ?? null;
+    setVacRpc(cached);
+    setVacRpcResolved(cached !== null);
 
     (async () => {
       try {
+        setVacRpcLoading(cached === null);
         const { data, error } =
           vacModel === "october"
             ? await supabase.rpc("get_vacation_balance_october_preview_for_user_at", {
@@ -230,19 +277,24 @@ export default function BalancesPage() {
 
         if (error) throw error;
 
-        setVacRpc({
+        const nextBalance: SelfVacationBalance = {
           granted: Number(data?.granted ?? 0),
           used: Number(data?.used ?? 0),
           reserved: Number(data?.reserved ?? 0),
           reservedPending: Number(data?.reserved_pending ?? 0),
           available: Number(data?.available ?? 0),
-        });
+        };
+        selfVacationBalanceCache.set(requestKey, nextBalance);
+        setVacRpc(nextBalance);
       } catch (e) {
         console.error("VAC RPC error", e);
-        setVacRpc(null);
+        if (!cached) setVacRpc(null);
+      } finally {
+        setVacRpcLoading(false);
+        setVacRpcResolved(true);
       }
     })();
-  }, [isAuthed, userId, periodAtISO, vacModel]);
+  }, [isAuthed, userId, periodAtISO, vacModel, vacModelReady]);
 
   const statsMap = useMemo(() => {
     const scopedAbsences = myAbsences;
@@ -279,7 +331,9 @@ export default function BalancesPage() {
       label:
         p.type === "licencia"
           ? getAbsenceTypeLabel("licencia", p.subtype ?? null)
-          : getAbsenceTypeLabel(p.type as any),
+          : getAbsenceTypeLabel(
+              p.type as Parameters<typeof getAbsenceTypeLabel>[0]
+            ),
     }));
 
     const byKey = new Map<BalanceKey, (typeof rows)[number]>();
@@ -421,61 +475,40 @@ export default function BalancesPage() {
     return statsList.find((x) => x.balanceKey === selectedKey) ?? null;
   }, [selectedKey, statsList]);
 
+  const balancesReady = absencesLoaded && vacRpcResolved;
+
   return (
     <UserLayout
       mode="user"
       header={{ title: "Balances", subtitle: "Cupos, usados, reservados (pendientes) e historial." }}
     >
-      {/* Top bar */}
-      <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-          <div className="flex flex-wrap items-end gap-2">
-            <div>
-              <label className="text-[12px] text-lll-text-soft">Año</label>
-              <input
-                className="mt-1 w-[120px] px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none"
-                type="number"
-                value={year}
-                onChange={(e) => setYear(Number(e.target.value))}
-              />
-            </div>
-
-            <div>
-              <label className="text-[12px] text-lll-text-soft">Mes</label>
-              <select
-                className="mt-1 min-w-[220px] px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none"
-                value={month0}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setMonth0(v === "toDate" ? v : Number(v));
-                }}
-              >
-                <option value="toDate">Hasta mes actual</option>
-                {visibleMonths.map((i) => (
-                  <option key={i} value={i}>
-                    {new Date(2020, i, 1).toLocaleDateString("es-AR", { month: "long" })}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <p className="md:ml-2 text-[12px] text-lll-text-soft">
-              Historial: <span className="text-lll-text">{rangeLabel}</span>
-              <span className="mx-2">·</span>
-              VacAt: <span className="text-lll-text">{periodAtISO}</span>
-              {vacModel === "october" ? (
-                <span className="ml-2 rounded-full border border-amber-400/30 bg-amber-500/10 px-2 py-0.5 text-amber-200">
-                  modelo octubre
-                </span>
-              ) : null}
-            </p>
-          </div>
-
-          <div className="flex justify-end">
+      <div className="mx-auto max-w-7xl space-y-4">
+        <PageSummary
+          leading={
+            <SummaryIcon tone="text-emerald-300">
+              <AppIcon name="balance" className="h-7 w-7" />
+            </SummaryIcon>
+          }
+          title="Mis balances"
+          subtitle="Consultá tus cupos, consumos y movimientos del período."
+          meta={
+            balancesReady ? (
+              <>
+                <SummaryChip>{rangeLabel}</SummaryChip>
+                <SummaryChip>{statsList.length} políticas</SummaryChip>
+                <SummaryChip>
+                  Modelo {vacModel === "october" ? "octubre" : "aniversario"}
+                </SummaryChip>
+              </>
+            ) : (
+              <SummaryChip>Cargando balances…</SummaryChip>
+            )
+          }
+          actions={
             <button
               type="button"
-              className="px-3 py-2 rounded-lg bg-lll-accent text-black font-semibold disabled:opacity-40"
-              disabled={!exportRows.length}
+              className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-lll-accent px-4 py-2 text-sm font-semibold text-black transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
+              disabled={vacRpcLoading || !exportRows.length}
               onClick={() => {
                 if (!exportRows.length) return;
                 downloadCSV(
@@ -484,14 +517,61 @@ export default function BalancesPage() {
                 );
               }}
             >
+              <AppIcon name="arrowRight" className="h-4 w-4 rotate-90" />
               Exportar CSV
             </button>
+          }
+        />
+
+        <SectionCard
+          title="Período del informe"
+          description="Ajustá el corte para recalcular métricas e historial."
+          icon={<AppIcon name="calendar" className="h-4 w-4" />}
+        >
+          <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-[160px_260px_1fr]">
+            <FormField label="Año">
+              <input
+                className={formControlClassName}
+                type="number"
+                value={year}
+                onChange={(event) => setYear(Number(event.target.value))}
+              />
+            </FormField>
+
+            <FormField label="Mes">
+              <select
+                className={formControlClassName}
+                value={month0}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setMonth0(value === "toDate" ? value : Number(value));
+                }}
+              >
+                <option value="toDate">Hasta mes actual</option>
+                {visibleMonths.map((monthIndex) => (
+                  <option key={monthIndex} value={monthIndex}>
+                    {new Date(2020, monthIndex, 1).toLocaleDateString("es-AR", { month: "long" })}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+
+            <div className="rounded-xl border border-lll-border bg-lll-bg-softer px-3 py-2 text-[12px] text-lll-text-soft">
+              Corte de vacaciones: <span className="text-lll-text">{periodAtISO}</span>
+              {vacModel === "october" ? (
+                <span className="ml-2 rounded-full border border-amber-400/30 bg-amber-500/10 px-2 py-0.5 text-amber-200">
+                  modelo octubre
+                </span>
+              ) : null}
+            </div>
           </div>
-        </div>
-      </div>
+        </SectionCard>
 
       {/* Main */}
-      <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {!balancesReady ? (
+        <BalancesSkeleton />
+      ) : (
+      <div className="lll-fade-in grid grid-cols-1 gap-4 lg:grid-cols-3">
         {/* Left: Políticas compactas */}
         <div className="lg:col-span-1">
           <div className="rounded-2xl border border-lll-border bg-lll-bg-soft overflow-hidden">
@@ -499,7 +579,10 @@ export default function BalancesPage() {
             <div className="sticky top-0 z-10 bg-lll-bg-soft/95 backdrop-blur border-b border-lll-border p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold">Políticas</p>
+                  <p className="flex items-center gap-2 text-sm font-semibold">
+                    <AppIcon name="policy" className="h-4 w-4 text-emerald-300" />
+                    Políticas
+                  </p>
                   <p className="text-[12px] text-lll-text-soft truncate">Tocá una para ver el detalle</p>
                 </div>
 
@@ -515,11 +598,11 @@ export default function BalancesPage() {
               </div>
 
               <div className="mt-3">
-                <input
+                <SearchField
                   value={q}
-                  onChange={(e) => setQ(e.target.value)}
+                  onChange={(event) => setQ(event.target.value)}
                   placeholder="Buscar política…"
-                  className="w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm"
+                  className="w-full"
                 />
                 <p className="mt-2 text-[12px] text-lll-text-soft">
                   {filteredStatsList.length} visible(s)
@@ -536,15 +619,24 @@ export default function BalancesPage() {
             {/* Scroll list */}
             <div className="p-3 max-h-[70vh] overflow-y-auto space-y-3">
               {statsList.length === 0 && (
-                <div className="rounded-2xl border border-lll-border bg-lll-bg-softer p-4 text-[12px] text-lll-text-soft">
-                  No hay datos aún.
+                <div className="rounded-2xl border border-lll-border bg-lll-bg-softer">
+                  <EmptyState
+                    icon={<AppIcon name="balance" className="h-5 w-5" />}
+                    title="Todavía no hay balances"
+                    description="Los datos van a aparecer cuando existan políticas o movimientos."
+                    className="py-8"
+                  />
                 </div>
               )}
 
               {statsList.length > 0 && filteredStatsList.length === 0 && (
-                <div className="rounded-2xl border border-lll-border bg-lll-bg-softer p-4 text-[12px] text-lll-text-soft">
-                  No hay políticas visibles con ese criterio. Probá:
-                  <span className="font-semibold"> “Mostrar todas”</span> o buscá por nombre.
+                <div className="rounded-2xl border border-lll-border bg-lll-bg-softer">
+                  <EmptyState
+                    icon={<AppIcon name="search" className="h-5 w-5" />}
+                    title="No encontramos políticas"
+                    description="Activá Mostrar todas o probá con otro nombre."
+                    className="py-8"
+                  />
                 </div>
               )}
 
@@ -609,7 +701,10 @@ export default function BalancesPage() {
             <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold">Detalle</p>
+                  <p className="flex items-center gap-2 text-sm font-semibold">
+                    <AppIcon name="balance" className="h-4 w-4 text-emerald-300" />
+                    Detalle
+                  </p>
                   <p className="mt-1 text-[clamp(1rem,3.5vw,1.125rem)] font-bold leading-tight truncate">{selected.label}</p>
                   <p className="mt-1 text-[12px] text-lll-text-soft">
                     Unidad: {fmtUnit(selected.unit)} · Cupo:{" "}
@@ -661,15 +756,22 @@ export default function BalancesPage() {
               </div>
             </div>
           ) : (
-            <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-6 text-sm text-lll-text-soft">
-              Seleccioná una política para ver el detalle.
+            <div className="rounded-2xl border border-lll-border bg-lll-bg-soft">
+              <EmptyState
+                icon={<AppIcon name="policy" className="h-5 w-5" />}
+                title="Seleccioná una política"
+                description="El detalle y sus métricas van a aparecer acá."
+              />
             </div>
           )}
 
           {/* Historial */}
           <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
             <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold">Historial</p>
+              <p className="flex items-center gap-2 text-sm font-semibold">
+                <AppIcon name="clock" className="h-4 w-4 text-emerald-300" />
+                Historial
+              </p>
               <p className="text-[12px] text-lll-text-soft">Incluye aprobadas + pendientes</p>
             </div>
 
@@ -702,7 +804,7 @@ export default function BalancesPage() {
                   {history.length === 0 && (
                     <tr>
                       <td colSpan={6} className="py-6 text-center text-[12px] text-lll-text-soft">
-                        No hay movimientos en este período 📭
+                        No hay movimientos en este período.
                       </td>
                     </tr>
                   )}
@@ -711,6 +813,8 @@ export default function BalancesPage() {
             </div>
           </div>
         </div>
+      </div>
+        )}
       </div>
     </UserLayout>
   );

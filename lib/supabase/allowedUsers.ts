@@ -33,14 +33,32 @@ export type CreateAllowedUserInput = {
 const ALLOWED_USERS_SELECT =
   "id,email,full_name,role,is_active,team,start_date,annual_vacation_days,created_at,created_by";
 
-export async function listAllowedUsers(): Promise<AllowedUser[]> {
-  const { data, error } = await supabase
-    .from("allowed_users")
-    .select(ALLOWED_USERS_SELECT)
-    .order("created_at", { ascending: false });
+let cachedAllowedUsers: AllowedUser[] | null = null;
+let allowedUsersRequest: Promise<AllowedUser[]> | null = null;
 
-  if (error) throw new Error(error.message);
-  return (data ?? []) as AllowedUser[];
+export function getCachedAllowedUsers() {
+  return cachedAllowedUsers;
+}
+
+export async function listAllowedUsers(): Promise<AllowedUser[]> {
+  if (allowedUsersRequest) return allowedUsersRequest;
+
+  allowedUsersRequest = (async () => {
+    const { data, error } = await supabase
+      .from("allowed_users")
+      .select(ALLOWED_USERS_SELECT)
+      .order("created_at", { ascending: false });
+
+    if (error) throw new Error(error.message);
+    cachedAllowedUsers = (data ?? []) as AllowedUser[];
+    return cachedAllowedUsers;
+  })();
+
+  try {
+    return await allowedUsersRequest;
+  } finally {
+    allowedUsersRequest = null;
+  }
 }
 
 export async function createAllowedUser(
@@ -67,7 +85,11 @@ export async function createAllowedUser(
     .single();
 
   if (error) throw new Error(error.message);
-  return data as AllowedUser;
+  const created = data as AllowedUser;
+  cachedAllowedUsers = cachedAllowedUsers
+    ? [created, ...cachedAllowedUsers]
+    : [created];
+  return created;
 }
 
 export async function updateAllowedUser(
@@ -87,10 +109,15 @@ export async function updateAllowedUser(
     .single();
 
   if (error) throw new Error(error.message);
-  return data as AllowedUser;
+  const updated = data as AllowedUser;
+  cachedAllowedUsers = cachedAllowedUsers?.map((user) =>
+    user.id === id ? updated : user
+  ) ?? null;
+  return updated;
 }
 
 export async function deleteAllowedUser(id: number): Promise<void> {
   const { error } = await supabase.from("allowed_users").delete().eq("id", id);
   if (error) throw new Error(error.message);
+  cachedAllowedUsers = cachedAllowedUsers?.filter((user) => user.id !== id) ?? null;
 }

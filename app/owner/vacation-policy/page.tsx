@@ -4,11 +4,22 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import UserLayout from "@/components/layout/UserLayout";
+import { AppIcon } from "@/components/ui/AppIcon";
+import { FormField, formControlClassName } from "@/components/ui/FormField";
+import { FormSkeleton } from "@/components/ui/LoadingSkeletons";
+import {
+  PageSummary,
+  SummaryChip,
+  SummaryIcon,
+} from "@/components/ui/PageSummary";
+import { SectionCard } from "@/components/ui/SectionCard";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/lib/supabase/client";
 import {
   DEFAULT_VACATION_POLICY_SETTINGS,
+  getCachedVacationPolicySettings,
   normalizeVacationPolicyMode,
+  setCachedVacationPolicySettings,
   type VacationPolicyMode,
   type VacationPolicySettings,
 } from "@/lib/supabase/vacationPolicy";
@@ -32,16 +43,37 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function getErrorMessage(error: unknown, fallback: string) {
+  if (
+    error &&
+    typeof error === "object" &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+  return fallback;
+}
+
 export default function OwnerVacationPolicyPage() {
   const router = useRouter();
   const { isLoading, isAuthed, role } = useAuth();
+  const cachedPolicy = getCachedVacationPolicySettings();
 
-  const [settings, setSettings] = useState<VacationPolicySettings>(DEFAULT_VACATION_POLICY_SETTINGS);
-  const [policyMode, setPolicyMode] = useState<VacationPolicyMode>("anniversary");
-  const [cycleStartMonth, setCycleStartMonth] = useState(10);
-  const [effectiveFrom, setEffectiveFrom] = useState(todayISO());
+  const [settings, setSettings] = useState<VacationPolicySettings>(
+    cachedPolicy ?? DEFAULT_VACATION_POLICY_SETTINGS
+  );
+  const [policyMode, setPolicyMode] = useState<VacationPolicyMode>(
+    cachedPolicy?.policy_mode ?? "anniversary"
+  );
+  const [cycleStartMonth, setCycleStartMonth] = useState(
+    cachedPolicy?.cycle_start_month ?? 10
+  );
+  const [effectiveFrom, setEffectiveFrom] = useState(
+    cachedPolicy?.effective_from ?? todayISO()
+  );
   const [note, setNote] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(cachedPolicy === null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
@@ -62,7 +94,7 @@ export default function OwnerVacationPolicyPage() {
 
     (async () => {
       try {
-        setLoading(true);
+        setLoading(getCachedVacationPolicySettings() === null);
         setError(null);
 
         const {
@@ -81,19 +113,20 @@ export default function OwnerVacationPolicyPage() {
         const json = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(json?.error ?? "No se pudo cargar la politica.");
 
-        const next = {
+        const next: VacationPolicySettings = {
           ...DEFAULT_VACATION_POLICY_SETTINGS,
           ...(json.settings ?? {}),
           policy_mode: normalizeVacationPolicyMode(json.settings?.policy_mode),
           cycle_start_month: Number(json.settings?.cycle_start_month ?? 10),
         };
 
+        setCachedVacationPolicySettings(next);
         setSettings(next);
         setPolicyMode(next.policy_mode);
         setCycleStartMonth(next.cycle_start_month);
         setEffectiveFrom(next.effective_from ?? todayISO());
-      } catch (e: any) {
-        setError(e?.message ?? "No se pudo cargar la politica.");
+      } catch (loadError: unknown) {
+        setError(getErrorMessage(loadError, "No se pudo cargar la política."));
       } finally {
         setLoading(false);
       }
@@ -140,30 +173,31 @@ export default function OwnerVacationPolicyPage() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json?.error ?? "No se pudo guardar la politica.");
 
-      const next = {
+      const next: VacationPolicySettings = {
         ...DEFAULT_VACATION_POLICY_SETTINGS,
         ...(json.settings ?? {}),
         policy_mode: normalizeVacationPolicyMode(json.settings?.policy_mode),
         cycle_start_month: Number(json.settings?.cycle_start_month ?? 10),
       };
 
+      setCachedVacationPolicySettings(next);
       setSettings(next);
       setPolicyMode(next.policy_mode);
       setCycleStartMonth(next.cycle_start_month);
       setEffectiveFrom(next.effective_from ?? todayISO());
       setNote("");
       setSavedMessage("Politica actualizada.");
-    } catch (e: any) {
-      setError(e?.message ?? "No se pudo guardar la politica.");
+    } catch (saveError: unknown) {
+      setError(getErrorMessage(saveError, "No se pudo guardar la política."));
     } finally {
       setSaving(false);
     }
   }
 
-  if (isLoading || !isAuthed || role !== "owner") {
+  if (isLoading || loading || !isAuthed || role !== "owner") {
     return (
       <UserLayout mode="owner" header={{ title: "Politica de vacaciones" }}>
-        <div className="text-sm text-lll-text-soft">Cargando...</div>
+        <FormSkeleton sections={3} />
       </UserLayout>
     );
   }
@@ -176,106 +210,150 @@ export default function OwnerVacationPolicyPage() {
         subtitle: "Modelo global para calculo de saldos.",
       }}
     >
-      <div className="max-w-4xl space-y-4">
-        <div className="rounded-lg border border-lll-border bg-lll-bg-soft p-5">
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h1 className="text-[clamp(1.125rem,3.5vw,1.25rem)] font-semibold leading-tight text-lll-text">Politica de vacaciones</h1>
-              <p className="mt-1 text-sm text-lll-text-soft">
-                Esto afecta los balances, ausencias y validaciones que consultan vacaciones.
-              </p>
-            </div>
-            <span className="mt-3 inline-flex w-fit rounded-full border border-lll-border bg-lll-bg-softer px-3 py-1 text-xs text-lll-text-soft sm:mt-0">
-              Actual: {settings.policy_mode === "october" ? "Octubre" : "Aniversario"}
-            </span>
-          </div>
-
-          {error ? (
-            <div className="mt-4 rounded-lg border border-red-400/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-              {error}
-            </div>
-          ) : null}
-
-          {savedMessage ? (
-            <div className="mt-4 rounded-lg border border-emerald-400/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-200">
-              {savedMessage}
-            </div>
-          ) : null}
-
-          <div className="mt-5 grid gap-4 md:grid-cols-2">
-            <label className="block">
-              <span className="text-xs font-medium uppercase tracking-wide text-lll-text-soft">
-                Modelo
-              </span>
-              <select
-                value={policyMode}
-                onChange={(e) => setPolicyMode(normalizeVacationPolicyMode(e.target.value))}
-                disabled={loading || saving}
-                className="mt-2 w-full rounded-lg border border-lll-border bg-lll-bg-softer px-3 py-2 text-sm outline-none"
+      <div className="mx-auto max-w-7xl space-y-4">
+        <PageSummary
+          leading={
+            <SummaryIcon tone="text-amber-300">
+              <AppIcon name="policy" className="h-7 w-7" />
+            </SummaryIcon>
+          }
+          title="Política de vacaciones"
+          subtitle="Define cómo se renuevan y calculan los días de toda la organización."
+          meta={
+            <>
+              <SummaryChip>
+                Actual: {settings.policy_mode === "october" ? "Octubre" : "Aniversario"}
+              </SummaryChip>
+              <SummaryChip>Vigente desde {settings.effective_from ?? "hoy"}</SummaryChip>
+            </>
+          }
+          actions={
+            <>
+              {savedMessage ? (
+                <span role="status" className="text-sm font-medium text-emerald-400">
+                  Política actualizada
+                </span>
+              ) : null}
+              <button
+                type="button"
+                onClick={saveSettings}
+                disabled={loading || saving || !isDirty}
+                className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-lll-accent px-4 py-2 text-sm font-semibold text-black transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40"
               >
-                <option value="anniversary">Renovacion por fecha de ingreso</option>
-                <option value="october">Renovacion global en octubre</option>
-              </select>
-            </label>
+                <AppIcon name={saving ? "clock" : "check"} className="h-4 w-4" />
+                {saving ? "Guardando…" : "Guardar política"}
+              </button>
+            </>
+          }
+        />
 
-            <label className="block">
-              <span className="text-xs font-medium uppercase tracking-wide text-lll-text-soft">
-                Mes de renovacion
-              </span>
-              <select
-                value={cycleStartMonth}
-                onChange={(e) => setCycleStartMonth(Number(e.target.value))}
-                disabled={loading || saving || policyMode !== "october"}
-                className="mt-2 w-full rounded-lg border border-lll-border bg-lll-bg-softer px-3 py-2 text-sm outline-none disabled:opacity-50"
+        {error ? (
+          <div role="alert" className="rounded-xl border border-red-400/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            {error}
+          </div>
+        ) : null}
+
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+          <SectionCard
+            title="Modelo de renovación"
+            description="Elegí si cada persona renueva por antigüedad o en una fecha común."
+            icon={<AppIcon name="calendar" className="h-4 w-4" />}
+            className="xl:col-span-7"
+          >
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <FormField label="Modelo">
+                <select
+                  value={policyMode}
+                  onChange={(event) =>
+                    setPolicyMode(normalizeVacationPolicyMode(event.target.value))
+                  }
+                  disabled={loading || saving}
+                  className={formControlClassName}
+                >
+                  <option value="anniversary">Por fecha de ingreso</option>
+                  <option value="october">Renovación global</option>
+                </select>
+              </FormField>
+
+              <FormField
+                label="Mes de renovación"
+                hint={policyMode !== "october" ? "Disponible para renovación global" : undefined}
               >
-                {monthOptions.map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+                <select
+                  value={cycleStartMonth}
+                  onChange={(event) => setCycleStartMonth(Number(event.target.value))}
+                  disabled={loading || saving || policyMode !== "october"}
+                  className={formControlClassName}
+                >
+                  {monthOptions.map((month) => (
+                    <option key={month.value} value={month.value}>
+                      {month.label}
+                    </option>
+                  ))}
+                </select>
+              </FormField>
+            </div>
 
-            <label className="block">
-              <span className="text-xs font-medium uppercase tracking-wide text-lll-text-soft">
-                Vigente desde
-              </span>
-              <input
-                type="date"
-                value={effectiveFrom}
-                onChange={(e) => setEffectiveFrom(e.target.value)}
-                disabled={loading || saving}
-                className="mt-2 w-full rounded-lg border border-lll-border bg-lll-bg-softer px-3 py-2 text-sm outline-none"
-              />
-            </label>
+            <div className="mt-4 rounded-xl border border-lll-border bg-lll-bg-softer p-3 text-[12px] leading-5 text-lll-text-soft">
+              {policyMode === "october"
+                ? `Todos los colaboradores renovarán su ciclo en ${monthOptions.find((month) => month.value === cycleStartMonth)?.label ?? "el mes seleccionado"}.`
+                : "Cada colaborador renovará su ciclo según su propia fecha de ingreso."}
+            </div>
+          </SectionCard>
 
-            <label className="block">
-              <span className="text-xs font-medium uppercase tracking-wide text-lll-text-soft">
-                Nota interna
-              </span>
-              <input
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                disabled={loading || saving}
-                placeholder="Motivo del cambio"
-                className="mt-2 w-full rounded-lg border border-lll-border bg-lll-bg-softer px-3 py-2 text-sm outline-none placeholder:text-lll-text-soft"
-              />
-            </label>
-          </div>
+          <SectionCard
+            title="Vigencia y registro"
+            description="Indicá desde cuándo aplica y dejá contexto del cambio."
+            icon={<AppIcon name="note" className="h-4 w-4" />}
+            className="xl:col-span-5"
+          >
+            <div className="space-y-3">
+              <FormField label="Vigente desde">
+                <input
+                  type="date"
+                  value={effectiveFrom}
+                  onChange={(event) => setEffectiveFrom(event.target.value)}
+                  disabled={loading || saving}
+                  className={formControlClassName}
+                />
+              </FormField>
 
-          <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-xs text-lll-text-soft">
-              El modo por URL sigue disponible para test: <span className="text-lll-text">?vacModel=october&amp;vacAt=2026-10-01</span>
-            </p>
-            <button
-              type="button"
-              onClick={saveSettings}
-              disabled={loading || saving || !isDirty}
-              className="rounded-lg border border-lll-accent/60 bg-lll-accent-soft px-4 py-2 text-sm font-medium text-lll-text disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {saving ? "Guardando..." : "Guardar politica"}
-            </button>
-          </div>
+              <FormField label="Nota interna" hint="Se registra junto con el próximo cambio.">
+                <input
+                  value={note}
+                  onChange={(event) => setNote(event.target.value)}
+                  disabled={loading || saving}
+                  placeholder="Motivo del cambio"
+                  className={formControlClassName}
+                />
+              </FormField>
+            </div>
+          </SectionCard>
+
+          <SectionCard
+            title="Impacto de esta política"
+            description="La configuración se comparte automáticamente entre estas áreas."
+            icon={<AppIcon name="info" className="h-4 w-4" />}
+            className="xl:col-span-12"
+          >
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              {[
+                { icon: "balance" as const, title: "Balances", text: "Cálculo de días otorgados y disponibles." },
+                { icon: "absence" as const, title: "Ausencias", text: "Validación de solicitudes y consumos." },
+                { icon: "calendar" as const, title: "Calendario", text: "Lectura consistente de cada período." },
+              ].map((item) => (
+                <div key={item.title} className="flex gap-3 rounded-xl border border-lll-border bg-lll-bg-softer p-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-lll-border bg-lll-bg text-lll-accent-alt">
+                    <AppIcon name={item.icon} className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-lll-text">{item.title}</p>
+                    <p className="mt-0.5 text-[11px] leading-4 text-lll-text-soft">{item.text}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </SectionCard>
         </div>
       </div>
     </UserLayout>

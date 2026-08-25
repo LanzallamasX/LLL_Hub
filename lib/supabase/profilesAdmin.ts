@@ -60,6 +60,13 @@ const PROFILES_SELECT_LEGACY = `
 
 const PROFILES_SELECT = `${PROFILES_SELECT_LEGACY}, vacation_days_override`;
 
+let cachedProfiles: ProfileRow[] | null = null;
+let profilesRequest: Promise<ProfileRow[]> | null = null;
+
+export function getCachedProfiles() {
+  return cachedProfiles;
+}
+
 function isMissingVacationOverride(error: { code?: string; message?: string } | null) {
   return (
     error?.code === "42703" ||
@@ -75,25 +82,37 @@ function withDefaultVacationOverride(rows: unknown[] | null): ProfileRow[] {
 }
 
 export async function listProfiles(): Promise<ProfileRow[]> {
-  const { data, error } = await supabase
-    .from("profiles")
-    .select(PROFILES_SELECT)
-    .order("created_at", { ascending: false })
-    .order("email", { ascending: true });
+  if (profilesRequest) return profilesRequest;
 
-  if (isMissingVacationOverride(error)) {
-    const legacy = await supabase
+  profilesRequest = (async () => {
+    const { data, error } = await supabase
       .from("profiles")
-      .select(PROFILES_SELECT_LEGACY)
+      .select(PROFILES_SELECT)
       .order("created_at", { ascending: false })
       .order("email", { ascending: true });
 
-    if (legacy.error) throw new Error(legacy.error.message);
-    return withDefaultVacationOverride(legacy.data as unknown[] | null);
-  }
+    if (isMissingVacationOverride(error)) {
+      const legacy = await supabase
+        .from("profiles")
+        .select(PROFILES_SELECT_LEGACY)
+        .order("created_at", { ascending: false })
+        .order("email", { ascending: true });
 
-  if (error) throw new Error(error.message);
-  return (data ?? []) as unknown as ProfileRow[];
+      if (legacy.error) throw new Error(legacy.error.message);
+      cachedProfiles = withDefaultVacationOverride(legacy.data as unknown[] | null);
+      return cachedProfiles;
+    }
+
+    if (error) throw new Error(error.message);
+    cachedProfiles = (data ?? []) as unknown as ProfileRow[];
+    return cachedProfiles;
+  })();
+
+  try {
+    return await profilesRequest;
+  } finally {
+    profilesRequest = null;
+  }
 }
 
 export type UpdateProfilePatch = Partial<
@@ -185,9 +204,17 @@ export async function updateProfile(id: string, patch: UpdateProfilePatch): Prom
       .single();
 
     if (legacy.error) throw new Error(legacy.error.message);
-    return withDefaultVacationOverride([legacy.data] as unknown[])[0];
+    const updated = withDefaultVacationOverride([legacy.data] as unknown[])[0];
+    cachedProfiles = cachedProfiles?.map((profile) =>
+      profile.id === id ? updated : profile
+    ) ?? null;
+    return updated;
   }
 
   if (error) throw new Error(error.message);
-  return data as unknown as ProfileRow;
+  const updated = data as unknown as ProfileRow;
+  cachedProfiles = cachedProfiles?.map((profile) =>
+    profile.id === id ? updated : profile
+  ) ?? null;
+  return updated;
 }

@@ -3,15 +3,16 @@
 import { useEffect, useState } from "react";
 
 import {
-  getAbsenceType,
   getAbsenceTypeLabel,
-  getAbsenceTypeToneClasses,
 } from "@/lib/absenceTypes";
 import { formatAR, formatARDateTime } from "@/lib/date";
+import { getAbsenceTimeRangeLabel } from "@/lib/absences/timeRange";
 
 
 import { useAbsences } from "@/contexts/AbsencesContext";
 import AbsenceConversation from "@/components/dashboard/AbsenceConversation";
+import { AppIcon } from "@/components/ui/AppIcon";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 import type { Absence, AbsenceStatus } from "@/lib/supabase/absences";
 
@@ -79,21 +80,29 @@ async function onDelete(a: Absence) {
   return (
     <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-semibold">Mis solicitudes</p>
+        <div className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-lll-border bg-lll-bg-softer text-lll-accent-alt">
+            <AppIcon name="absence" className="h-4 w-4" />
+          </div>
+          <p className="text-sm font-semibold">Mis solicitudes</p>
+        </div>
         <span className="text-[12px] text-lll-text-soft">{absences.length}</span>
       </div>
 
       <div className="mt-3 space-y-3">
         {absences.length === 0 ? (
-          <div className="rounded-xl border border-lll-border bg-lll-bg-softer p-3 text-[12px] text-lll-text-soft">
-            Todavía no tenés solicitudes. Usá <span className="text-lll-text">“Nueva solicitud”</span> para crear la primera.
+          <div className="rounded-xl border border-lll-border bg-lll-bg-softer">
+            <EmptyState
+              icon={<AppIcon name="calendar" className="h-5 w-5" />}
+              title="No hay solicitudes para mostrar"
+              description="Creá una nueva solicitud o cambiá los filtros para ver otros resultados."
+            />
           </div>
         ) : null}
 
         {absences.map((a) => {
-          const def = getAbsenceType(a.type);
-          const cls = getAbsenceTypeToneClasses(def?.tone ?? "neutral");
           const isBusy = busyId === a.id;
+          const timeRangeLabel = getAbsenceTimeRangeLabel(a);
 
           return (
             <div
@@ -111,15 +120,34 @@ async function onDelete(a: Absence) {
                     {getAbsenceTypeLabel(a.type, a.subtype ?? null)}
                   </p>
 
-                  <p className="mt-2 text-[12px] text-lll-text-soft">
-                    {formatAR(a.from)} → {formatAR(a.to)}
-                    {a.note ? ` · ${a.note}` : ""}
-                  </p>
+                  <div className="mt-2 flex items-start gap-2 text-[12px] text-lll-text-soft">
+                    <AppIcon name="calendar" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <p>
+                      {formatAR(a.from)} → {formatAR(a.to)}
+                      {a.note ? ` · ${a.note}` : ""}
+                    </p>
+                  </div>
+
+                  {timeRangeLabel ? (
+                    <p className="mt-1 flex items-center gap-2 text-[12px] text-lll-text-soft">
+                      <AppIcon name="clock" className="h-3.5 w-3.5 shrink-0" />
+                      <span className="text-lll-text">{timeRangeLabel}</span>
+                    </p>
+                  ) : null}
                 </div>
 
                 <div className="flex flex-col items-end gap-2">
                   <span className={statusPill(a.status)}>
-                    <span className={`w-2 h-2 rounded-full ${cls.dot}`} />
+                    <AppIcon
+                      name={
+                        a.status === "pendiente"
+                          ? "clock"
+                          : a.status === "aprobado"
+                            ? "check"
+                            : "close"
+                      }
+                      className="h-3.5 w-3.5"
+                    />
                     {statusLabel(a.status)}
                   </span>
 
@@ -150,6 +178,7 @@ async function onDelete(a: Absence) {
                         }`}
                         type="button"
                       >
+                        <AppIcon name="edit" className="mr-1 inline h-3.5 w-3.5" />
                         Editar
                       </button>
 
@@ -163,6 +192,7 @@ async function onDelete(a: Absence) {
                         }`}
                         type="button"
                       >
+                        <AppIcon name="trash" className="mr-1 inline h-3.5 w-3.5" />
                         Eliminar
                       </button>
                     </div>

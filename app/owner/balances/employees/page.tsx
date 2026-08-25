@@ -5,17 +5,41 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import UserLayout from "@/components/layout/UserLayout";
+import { AppIcon } from "@/components/ui/AppIcon";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { ListSkeleton } from "@/components/ui/LoadingSkeletons";
+import {
+  PageSummary,
+  SummaryChip,
+  SummaryIcon,
+} from "@/components/ui/PageSummary";
+import { SearchField } from "@/components/ui/SearchField";
+import { SectionCard } from "@/components/ui/SectionCard";
 import { useAuth } from "@/contexts/AuthContext";
+import {
+  getCachedProfiles,
+  listProfiles,
+  type ProfileRow,
+} from "@/lib/supabase/profilesAdmin";
 
-import { listProfiles, type ProfileRow } from "@/lib/supabase/profilesAdmin";
+function getInitials(person: ProfileRow) {
+  const source = person.full_name?.trim() || person.email?.trim() || "Usuario";
+  return source
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+}
 
 export default function OwnerBalancesEmployeesPage() {
   const router = useRouter();
   const { isLoading, isAuthed, role } = useAuth();
+  const cachedProfiles = getCachedProfiles();
 
-  const [loading, setLoading] = useState(true);
-  const [rows, setRows] = useState<ProfileRow[]>([]);
-  const [q, setQ] = useState("");
+  const [loading, setLoading] = useState(cachedProfiles === null);
+  const [rows, setRows] = useState<ProfileRow[]>(cachedProfiles ?? []);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     if (isLoading) return;
@@ -30,7 +54,7 @@ export default function OwnerBalancesEmployeesPage() {
 
     (async () => {
       try {
-        setLoading(true);
+        setLoading(getCachedProfiles() === null);
         const data = await listProfiles();
         setRows(data ?? []);
       } finally {
@@ -40,15 +64,20 @@ export default function OwnerBalancesEmployeesPage() {
   }, [isLoading, isAuthed, role, router]);
 
   const filtered = useMemo(() => {
-    const query = q.trim().toLowerCase();
-    if (!query) return rows;
+    const normalizedQuery = query.trim().toLowerCase();
+    if (!normalizedQuery) return rows;
 
-    return rows.filter((p) => {
-      const name = (p.full_name ?? "").toLowerCase();
-      const email = (p.email ?? "").toLowerCase();
-      return name.includes(query) || email.includes(query);
+    return rows.filter((person) => {
+      const name = (person.full_name ?? "").toLowerCase();
+      const email = (person.email ?? "").toLowerCase();
+      const team = (person.team ?? "").toLowerCase();
+      return (
+        name.includes(normalizedQuery) ||
+        email.includes(normalizedQuery) ||
+        team.includes(normalizedQuery)
+      );
     });
-  }, [rows, q]);
+  }, [rows, query]);
 
   return (
     <UserLayout
@@ -58,58 +87,81 @@ export default function OwnerBalancesEmployeesPage() {
         subtitle: "Elegí una persona para ver su balance y su historial.",
       }}
     >
-      <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold">Colaboradores</p>
-            <p className="text-[12px] text-lll-text-soft">
-              {loading ? "Cargando…" : `${filtered.length} resultado(s)`}
-            </p>
-          </div>
+      <div className="mx-auto max-w-7xl space-y-4">
+        <PageSummary
+          leading={
+            <SummaryIcon tone="text-sky-300">
+              <AppIcon name="balance" className="h-7 w-7" />
+            </SummaryIcon>
+          }
+          title="Balance anual por colaborador"
+          subtitle="Consultá cupos, consumos e historial individual."
+          meta={
+            <>
+              <SummaryChip>{rows.length} colaboradores</SummaryChip>
+              <SummaryChip>{filtered.length} visibles</SummaryChip>
+            </>
+          }
+        />
 
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Buscar por nombre o email…"
-            className="w-full md:w-[420px] px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border text-sm placeholder:text-lll-text-soft outline-none"
-          />
-        </div>
-      </div>
+        <SectionCard
+          title="Colaboradores"
+          description="Seleccioná una persona para abrir el detalle completo."
+          icon={<AppIcon name="users" className="h-4 w-4" />}
+          action={
+            <SearchField
+              className="w-[min(420px,46vw)] max-w-full"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Buscar por nombre, email o equipo…"
+            />
+          }
+        >
+          <div className="overflow-hidden rounded-xl border border-lll-border bg-lll-bg-softer">
+            <div className="max-h-[62vh] overflow-y-auto scrollbar-thin">
+              {loading ? (
+                <ListSkeleton rows={7} />
+              ) : filtered.length === 0 ? (
+                <EmptyState
+                  icon={<AppIcon name="search" className="h-5 w-5" />}
+                  title="No encontramos colaboradores"
+                  description="Probá buscando por otro nombre, email o equipo."
+                />
+              ) : (
+                <ul className="lll-fade-in divide-y divide-lll-border">
+                  {filtered.map((person) => (
+                    <li key={person.id}>
+                      <Link
+                        href={`/owner/balances/employees/${person.id}`}
+                        className="group flex items-center justify-between gap-4 px-4 py-3 transition hover:bg-white/[0.035]"
+                      >
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-lll-border bg-lll-bg text-xs font-semibold text-sky-300">
+                            {getInitials(person)}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-lll-text">
+                              {person.full_name ?? "Sin nombre"}
+                            </p>
+                            <p className="truncate text-[12px] text-lll-text-soft">
+                              {person.email ?? "Sin email"}
+                              {person.team ? ` · ${person.team}` : ""}
+                            </p>
+                          </div>
+                        </div>
 
-      <div className="mt-4 rounded-2xl border border-lll-border bg-lll-bg-soft overflow-hidden">
-        <div className="max-h-[70vh] overflow-y-auto scrollbar-thin">
-          {loading ? (
-            <div className="p-4 text-[12px] text-lll-text-soft">Cargando colaboradores…</div>
-          ) : filtered.length === 0 ? (
-            <div className="p-4 text-[12px] text-lll-text-soft">
-              No hay coincidencias con esa búsqueda.
+                        <span className="flex shrink-0 items-center gap-2 text-[12px] text-lll-text-soft transition group-hover:text-lll-text">
+                          Ver balance
+                          <AppIcon name="arrowRight" className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-          ) : (
-            <ul className="divide-y divide-lll-border">
-              {filtered.map((p) => (
-                <li key={p.id} className="p-4 hover:bg-lll-bg-softer transition">
-                  <Link
-                    href={`/owner/balances/employees/${p.id}`}
-                    className="flex items-center justify-between gap-3"
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold truncate">
-                        {p.full_name ?? "Sin nombre"}
-                      </p>
-                      <p className="text-[12px] text-lll-text-soft truncate">
-                        {p.email ?? "sin email"}
-                      </p>
-                    </div>
-
-                    <div className="text-[12px] text-lll-text-soft shrink-0">
-                      Ver balance →
-                    </div>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+          </div>
+        </SectionCard>
       </div>
     </UserLayout>
   );

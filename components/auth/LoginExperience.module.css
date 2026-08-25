@@ -2,9 +2,63 @@
   min-height: 100svh;
   display: grid;
   grid-template-columns: minmax(480px, 0.88fr) minmax(540px, 1.12fr);
+  position: relative;
   overflow: hidden;
   background: #f4f3ef;
   color: #111118;
+}
+
+.introSequence {
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  pointer-events: none;
+  background: #f4f3ef;
+  animation: introLayerExit 540ms cubic-bezier(0.65, 0, 0.35, 1) 1120ms forwards;
+}
+
+.introMark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(12px, 1.6vw, 24px);
+  padding-inline: 24px;
+  animation: introMarkExit 480ms cubic-bezier(0.16, 1, 0.3, 1) 1080ms forwards;
+}
+
+.introWordmark {
+  display: flex;
+  align-items: center;
+  gap: clamp(1px, 0.24vw, 5px);
+  color: #111118;
+  font-size: clamp(28px, 5vw, 76px);
+  font-weight: 900;
+  letter-spacing: -0.065em;
+  line-height: 1;
+}
+
+.introLetter {
+  display: inline-block;
+  opacity: 0;
+  animation: introLetterIn 460ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.introHub {
+  display: inline-flex;
+  min-height: clamp(29px, 3.1vw, 46px);
+  align-items: center;
+  border: 1px solid rgba(17, 17, 24, 0.22);
+  border-radius: 999px;
+  padding: 0 clamp(10px, 1vw, 16px);
+  opacity: 0;
+  color: #111118;
+  font-size: clamp(10px, 1vw, 15px);
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  animation: introHubIn 520ms cubic-bezier(0.16, 1, 0.3, 1) 720ms both;
 }
 
 .loginPane {
@@ -23,6 +77,7 @@
   align-items: center;
   gap: 12px;
   width: fit-content;
+  animation: loginItemIn 560ms cubic-bezier(0.16, 1, 0.3, 1) 1680ms backwards;
 }
 
 .brand img {
@@ -58,6 +113,7 @@
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
+  animation: loginItemIn 560ms cubic-bezier(0.16, 1, 0.3, 1) 1740ms backwards;
 }
 
 .eyebrow span {
@@ -76,6 +132,7 @@
   font-weight: 620;
   letter-spacing: -0.052em;
   line-height: 0.98;
+  animation: loginTitleIn 680ms cubic-bezier(0.16, 1, 0.3, 1) 1820ms backwards;
 }
 
 .intro {
@@ -84,12 +141,14 @@
   color: #6c6a72;
   font-size: 15px;
   line-height: 1.65;
+  animation: loginItemIn 560ms cubic-bezier(0.16, 1, 0.3, 1) 1900ms backwards;
 }
 
 .form {
   display: grid;
   gap: 21px;
   margin-top: 38px;
+  animation: loginItemIn 620ms cubic-bezier(0.16, 1, 0.3, 1) 1980ms backwards;
 }
 
 .fieldGroup {
@@ -294,6 +353,7 @@
   gap: 11px;
   margin-top: 24px;
   color: #77747c;
+  animation: loginItemIn 560ms cubic-bezier(0.16, 1, 0.3, 1) 2070ms backwards;
 }
 
 .firstAccess > span {
@@ -333,6 +393,7 @@
   color: #98959c;
   font-size: 10px;
   letter-spacing: 0.02em;
+  animation: loginItemIn 520ms cubic-bezier(0.16, 1, 0.3, 1) 2140ms backwards;
 }
 
 .secure {
@@ -355,6 +416,8 @@
   background: #030204;
   color: white;
   isolation: isolate;
+  will-change: transform, opacity;
+  animation: visualPaneReveal 1050ms cubic-bezier(0.16, 1, 0.3, 1) 1120ms both;
 }
 
 .gradientCanvas {
@@ -441,6 +504,7 @@
   font-weight: 650;
   letter-spacing: 0.09em;
   text-transform: uppercase;
+  animation: loginItemIn 560ms cubic-bezier(0.16, 1, 0.3, 1) 1840ms backwards;
 }
 
 .liveDot {
@@ -491,6 +555,7 @@
   font-weight: 750;
   letter-spacing: 0.17em;
   text-transform: uppercase;
+  animation: loginItemIn 520ms cubic-bezier(0.16, 1, 0.3, 1) 1900ms backwards;
 }
 
 .visualCopy h2 {
@@ -500,6 +565,7 @@
   letter-spacing: -0.052em;
   line-height: 0.98;
   text-wrap: balance;
+  animation: loginTitleIn 720ms cubic-bezier(0.16, 1, 0.3, 1) 1980ms backwards;
 }
 
 .visualCopy > p:last-child {
@@ -508,6 +574,7 @@
   color: rgba(255, 255, 255, 0.62);
   font-size: 13px;
   line-height: 1.55;
+  animation: loginItemIn 560ms cubic-bezier(0.16, 1, 0.3, 1) 2080ms backwards;
 }
 
 .redirecting {
@@ -529,6 +596,105 @@
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+@keyframes introLetterIn {
+  0% {
+    opacity: 0;
+    filter: blur(9px);
+    transform: translateY(42%) scale(0.72);
+  }
+  68% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(-4%) scale(1.04);
+  }
+  100% {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes introHubIn {
+  0% {
+    opacity: 0;
+    transform: translateX(-12px) scale(0.8);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes introMarkExit {
+  to {
+    opacity: 0;
+    filter: blur(8px);
+    transform: translateY(-10px) scale(1.035);
+  }
+}
+
+@keyframes introLayerExit {
+  0% {
+    background: #f4f3ef;
+    opacity: 1;
+    visibility: visible;
+  }
+  99% {
+    visibility: visible;
+  }
+  100% {
+    background: rgba(244, 243, 239, 0);
+    opacity: 0;
+    visibility: hidden;
+  }
+}
+
+@keyframes visualPaneReveal {
+  0% {
+    opacity: 0.45;
+    transform: translate3d(-12%, 0, 0) scaleX(0.08);
+    transform-origin: left center;
+  }
+  42% {
+    opacity: 1;
+  }
+  76% {
+    transform: translate3d(0, 0, 0) scaleX(1.015);
+    transform-origin: left center;
+  }
+  100% {
+    opacity: 1;
+    transform: scaleX(1);
+    transform-origin: left center;
+  }
+}
+
+@keyframes loginItemIn {
+  from {
+    opacity: 0;
+    filter: blur(5px);
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+
+@keyframes loginTitleIn {
+  from {
+    opacity: 0;
+    filter: blur(7px);
+    transform: translateY(22px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
 }
 
 @keyframes float {
@@ -660,6 +826,34 @@
     width: min(100%, 460px);
     margin-inline: auto;
   }
+
+  .brand {
+    animation-delay: 1350ms;
+  }
+
+  .eyebrow {
+    animation-delay: 1420ms;
+  }
+
+  .formContainer h1 {
+    animation-delay: 1490ms;
+  }
+
+  .intro {
+    animation-delay: 1570ms;
+  }
+
+  .form {
+    animation-delay: 1650ms;
+  }
+
+  .firstAccess {
+    animation-delay: 1740ms;
+  }
+
+  .loginFooter {
+    animation-delay: 1810ms;
+  }
 }
 
 @media (max-width: 520px) {
@@ -686,6 +880,22 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .introSequence {
+    display: none;
+  }
+
+  .visualPane,
+  .visualTopline,
+  .visualCopy .kicker,
+  .visualCopy h2,
+  .visualCopy > p:last-child,
+  .brand,
+  .eyebrow,
+  .formContainer h1,
+  .intro,
+  .form,
+  .firstAccess,
+  .loginFooter,
   .productPreview,
   .gradientOrb {
     animation: none;

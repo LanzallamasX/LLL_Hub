@@ -3,6 +3,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import UserLayout from "@/components/layout/UserLayout";
+import { AppIcon } from "@/components/ui/AppIcon";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { FormField, formControlClassName } from "@/components/ui/FormField";
+import {
+  PageSummary,
+  SummaryChip,
+  SummaryIcon,
+} from "@/components/ui/PageSummary";
+import { SearchField } from "@/components/ui/SearchField";
+import { SectionCard } from "@/components/ui/SectionCard";
+import { Skeleton } from "@/components/ui/Skeleton";
+import { TableSkeleton } from "@/components/ui/LoadingSkeletons";
 import { useAuth } from "@/contexts/AuthContext";
 
 import { supabase } from "@/lib/supabase/client";
@@ -15,6 +27,7 @@ import EditProfileModal, {
 import {
   AllowedUserRole,
   type AllowedUser,
+  getCachedAllowedUsers,
   listAllowedUsers,
   createAllowedUser,
   deleteAllowedUser,
@@ -24,6 +37,7 @@ import {
 import {
   type ProfileRow,
   type ProfileRole,
+  getCachedProfiles,
   listProfiles,
   updateProfile,
 } from "@/lib/supabase/profilesAdmin";
@@ -75,15 +89,17 @@ function pickDefined<T extends Record<string, any>>(obj: T) {
 export default function OwnerUsersPage() {
   const router = useRouter();
   const { isLoading, isAuthed, userId, role } = useAuth();
+  const cachedProfiles = getCachedProfiles();
+  const cachedAllowedUsers = getCachedAllowedUsers();
 
   // ====== Profiles (empleados reales) ======
-  const [profiles, setProfiles] = useState<ProfileRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [profiles, setProfiles] = useState<ProfileRow[]>(cachedProfiles ?? []);
+  const [loading, setLoading] = useState(cachedProfiles === null);
   const [error, setError] = useState<string | null>(null);
 
   // ====== Allowlist ======
-  const [allowedUsers, setAllowedUsers] = useState<AllowedUser[]>([]);
-  const [allowedLoading, setAllowedLoading] = useState(true);
+  const [allowedUsers, setAllowedUsers] = useState<AllowedUser[]>(cachedAllowedUsers ?? []);
+  const [allowedLoading, setAllowedLoading] = useState(cachedAllowedUsers === null);
 
   // ====== Pre-alta ======
   const [preAltaOpen, setPreAltaOpen] = useState(false);
@@ -119,8 +135,8 @@ export default function OwnerUsersPage() {
 
   async function refresh() {
     setError(null);
-    setLoading(true);
-    setAllowedLoading(true);
+    setLoading(getCachedProfiles() === null);
+    setAllowedLoading(getCachedAllowedUsers() === null);
 
     try {
       const [profilesData, allowedData] = await Promise.all([
@@ -523,51 +539,68 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
         subtitle: "Gestioná personas y su estado (Pendiente / Registrado).",
       }}
     >
-      {/* TOP BAR: buscar + filtros + refresh */}
-      <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold">Directorio</p>
-            <p className="mt-1 text-[12px] text-lll-text-soft">
-              {busy ? "Cargando…" : `${people.length} resultado(s)`}
-              {" · "}
-              <span className="text-lll-text-soft">Pendientes:</span> {counts.pendiente}
-              {" · "}
-              <span className="text-lll-text-soft">Registrados:</span> {counts.registrado}
-              {" · "}
-              <span className="text-lll-text-soft">Sin allowlist:</span> {counts.sin_allowlist}
-            </p>
-          </div>
+      <div className="mx-auto max-w-7xl space-y-4">
+        <PageSummary
+          leading={
+            <SummaryIcon>
+              <AppIcon name="users" className="h-7 w-7" />
+            </SummaryIcon>
+          }
+          title="Directorio de personas"
+          subtitle="Gestioná colaboradores, accesos y estados desde una sola vista."
+          meta={
+            busy && people.length === 0 ? (
+              <Skeleton className="h-6 w-60 rounded-full" />
+            ) : (
+              <>
+                <SummaryChip>{counts.registrado} registrados</SummaryChip>
+                <SummaryChip>{counts.pendiente} pendientes</SummaryChip>
+                <SummaryChip>{counts.sin_allowlist} sin allowlist</SummaryChip>
+              </>
+            )
+          }
+          actions={
+            <>
+              <button
+                type="button"
+                onClick={refresh}
+                className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-lll-border bg-lll-bg-softer px-3 py-2 text-sm text-lll-text-soft transition hover:text-lll-text"
+              >
+                <AppIcon name="clock" className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />
+                {busy ? "Actualizando…" : "Actualizar"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setPreAltaOpen((open) => !open)}
+                className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-lll-accent px-4 py-2 text-sm font-semibold text-black transition hover:brightness-110"
+              >
+                <AppIcon name={preAltaOpen ? "close" : "plus"} className="h-4 w-4" />
+                {preAltaOpen ? "Cerrar pre-alta" : "Nueva pre-alta"}
+              </button>
+            </>
+          }
+        />
 
-          <div className="flex flex-col md:flex-row md:flex-wrap md:justify-end gap-2 w-full md:w-auto">
-            <input
-              className="w-full md:w-[min(360px,42vw)] px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm"
+        {error ? (
+          <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+            {error}
+          </div>
+        ) : null}
+
+        <SectionCard
+          title="Buscar y filtrar"
+          description={`${people.length} resultado${people.length === 1 ? "" : "s"} en el directorio.`}
+          icon={<AppIcon name="filter" className="h-4 w-4" />}
+          action={
+            <SearchField
+              className="w-[min(360px,42vw)] max-w-full"
               placeholder="Buscar por email, nombre o equipo…"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              type="text"
+              onChange={(event) => setQuery(event.target.value)}
             />
-
-            <button
-              type="button"
-              onClick={() => setPreAltaOpen((v) => !v)}
-              className="min-h-10 px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-[clamp(0.75rem,2.2vw,0.875rem)] leading-tight text-lll-text-soft hover:text-lll-text"
-            >
-              {preAltaOpen ? "Cerrar pre-alta" : "Nueva pre-alta"}
-            </button>
-
-            <button
-              onClick={refresh}
-              type="button"
-              className="min-h-10 px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-[clamp(0.75rem,2.2vw,0.875rem)] leading-tight text-lll-text-soft hover:text-lll-text"
-            >
-              {busy ? "Actualizando…" : "Actualizar"}
-            </button>
-          </div>
-        </div>
-
-        {/* Filtros rápidos */}
-        <div className="mt-4 flex flex-wrap gap-2">
+          }
+        >
+          <div className="flex flex-wrap gap-2">
           {(
             [
               { k: "all", label: "Todos" },
@@ -592,95 +625,82 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
               </button>
             );
           })}
-        </div>
-
-        {error && (
-          <div className="mt-4 rounded-xl border border-lll-border bg-lll-bg-softer p-3 text-sm text-lll-text-soft">
-            {error}
           </div>
-        )}
-      </div>
+        </SectionCard>
 
-      {/* PRE-ALTA (colapsable) */}
-      {preAltaOpen && (
-        <div className="mt-4 rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold">Nueva pre-alta</p>
-              <p className="mt-1 text-[12px] text-lll-text-soft">
-                Crea la entrada en <code>allowed_users</code>. Quedará{" "}
-                <span className="text-lll-text">Pendiente</span> hasta que la persona se registre.
-              </p>
-            </div>
+        {preAltaOpen && (
+        <SectionCard
+          title="Nueva pre-alta"
+          description="Creá el acceso inicial; quedará pendiente hasta que la persona se registre."
+          icon={<AppIcon name="mail" className="h-4 w-4" />}
+          action={
             <button
               type="button"
               onClick={() => setPreAltaOpen(false)}
-              className="px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-sm text-lll-text-soft hover:text-lll-text"
+              className="flex h-9 w-9 items-center justify-center rounded-lg border border-lll-border bg-lll-bg-softer text-lll-text-soft transition hover:text-lll-text"
+              aria-label="Cerrar pre-alta"
             >
-              Cerrar
+              <AppIcon name="close" className="h-4 w-4" />
             </button>
-          </div>
-
-          <div className="mt-3 flex flex-col md:flex-row md:items-end gap-3">
-            <div className="flex-1">
-              <label className="text-[12px] text-lll-text-soft">Email</label>
+          }
+        >
+          <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-12">
+            <FormField label="Email" className="md:col-span-4">
               <input
-                className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm"
+                className={formControlClassName}
                 placeholder="persona@lanzallamas.com"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(event) => setEmail(event.target.value)}
                 type="email"
               />
-            </div>
+            </FormField>
 
-            <div className="flex-1">
-              <label className="text-[12px] text-lll-text-soft">Nombre (opcional)</label>
+            <FormField label="Nombre (opcional)" className="md:col-span-3">
               <input
-                className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm"
+                className={formControlClassName}
                 placeholder="Nombre Apellido"
                 value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
+                onChange={(event) => setFullName(event.target.value)}
                 type="text"
               />
-            </div>
+            </FormField>
 
-            <div className="w-full md:w-[160px]">
-              <label className="text-[12px] text-lll-text-soft">Rol</label>
+            <FormField label="Rol" className="md:col-span-2">
               <select
-                className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm"
+                className={formControlClassName}
                 value={newRole}
-                onChange={(e) => setNewRole(e.target.value as AllowedUserRole)}
+                onChange={(event) => setNewRole(event.target.value as AllowedUserRole)}
               >
                 <option value="user">user</option>
                 <option value="owner">owner</option>
               </select>
-            </div>
+            </FormField>
 
-            <div className="w-full md:w-[160px]">
-              <label className="text-[12px] text-lll-text-soft">Estado</label>
+            <FormField label="Estado" className="md:col-span-2">
               <select
-                className="mt-1 w-full px-3 py-2 rounded-lg bg-lll-bg-softer border border-lll-border outline-none text-sm"
+                className={formControlClassName}
                 value={isActive ? "active" : "inactive"}
-                onChange={(e) => setIsActive(e.target.value === "active")}
+                onChange={(event) => setIsActive(event.target.value === "active")}
               >
                 <option value="active">activo</option>
                 <option value="inactive">inactivo</option>
               </select>
-            </div>
+            </FormField>
 
             <button
               onClick={handleAdd}
-              className="px-4 py-2 rounded-lg bg-lll-accent text-black font-semibold"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-lll-accent px-4 py-2 text-sm font-semibold text-black md:col-span-1"
               type="button"
             >
-              Agregar
+              <AppIcon name="plus" className="h-4 w-4" />
+              <span className="md:sr-only xl:not-sr-only">Agregar</span>
             </button>
           </div>
-        </div>
-      )}
+        </SectionCard>
+        )}
 
       {/* TABLE */}
-      <div className="mt-4 rounded-2xl border border-lll-border bg-lll-bg-soft overflow-hidden">
+        <div className="rounded-2xl border border-lll-border bg-lll-bg-soft overflow-hidden">
         {/* Sticky header */}
         <div className="sticky top-0 z-10 hidden xl:block bg-lll-bg-soft/95 backdrop-blur border-b border-lll-border">
           <div className="grid grid-cols-12 gap-2 px-4 py-3 text-[12px] text-lll-text-soft">
@@ -693,17 +713,29 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
         </div>
 
         <div className="">
-          {busy ? (
-            <div className="p-4 text-sm text-lll-text-soft">Cargando…</div>
+          {busy && people.length === 0 ? (
+            <TableSkeleton rows={7} />
           ) : people.length === 0 ? (
-            <div className="p-4 text-sm text-lll-text-soft">No hay resultados.</div>
+            <EmptyState
+              icon={<AppIcon name="users" className="h-5 w-5" />}
+              title="No encontramos personas"
+              description="Probá con otra búsqueda o cambiá el filtro seleccionado."
+            />
           ) : (
-            people.map((row) => {
+            <div className="lll-fade-in">
+            {people.map((row) => {
               const p = row.profile;
 
               const roleValue = (p?.role ?? row.allow?.role ?? "user") as ProfileRole;
               const isActiveValue = p?.active ?? row.allow?.is_active ?? true;
               const canEditProfile = Boolean(p);
+              const rowName = getRowName(row);
+              const initials = rowName
+                .split(/\s+/)
+                .filter(Boolean)
+                .slice(0, 2)
+                .map((part) => part[0]?.toUpperCase())
+                .join("") || row.email[0]?.toUpperCase() || "U";
 
               const statusChip =
                 row.status === "pendiente"
@@ -717,15 +749,20 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
                   key={row.key}
                   className="grid grid-cols-1 gap-3 px-4 py-4 text-sm border-b border-lll-border/60 xl:grid-cols-12 xl:gap-2 xl:py-3 xl:items-center"
                 >
-                  <div className="xl:col-span-4 min-w-0">
-                    <p className="font-medium break-words xl:truncate">{row.email}</p>
-                    <p className="text-[12px] text-lll-text-soft">
-                      {(p?.team ?? row.allow?.team ?? "").trim() || "—"}
-                    </p>
+                  <div className="flex min-w-0 items-center gap-3 xl:col-span-4">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-lll-border bg-lll-bg-softer text-[11px] font-semibold text-lll-accent-alt">
+                      {initials}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-medium break-words xl:truncate">{row.email}</p>
+                      <p className="text-[12px] text-lll-text-soft">
+                        {(p?.team ?? row.allow?.team ?? "").trim() || "—"}
+                      </p>
+                    </div>
                   </div>
 
                   <div className="xl:col-span-3 min-w-0 text-lll-text-soft">
-                    {getRowName(row)}
+                    {rowName}
                   </div>
 
                   <div className="xl:col-span-2">
@@ -784,17 +821,19 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
                       <button
                         onClick={() => openEdit(p!)}
                         type="button"
-                        className="min-h-10 px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-[clamp(0.75rem,2.2vw,0.875rem)] leading-tight text-lll-text-soft hover:text-lll-text"
+                        className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-lll-border bg-lll-bg-softer px-3 py-2 text-sm leading-tight text-lll-text-soft hover:text-lll-text"
                       >
+                        <AppIcon name="edit" className="h-4 w-4" />
                         Editar
                       </button>
                     ) : (
                       <button
                         onClick={() => sendAccess(row.email)}
                         type="button"
-                        className="min-h-10 px-3 py-2 rounded-lg border border-lll-border bg-lll-bg-softer text-[clamp(0.75rem,2.2vw,0.875rem)] leading-tight text-lll-text-soft hover:text-lll-text"
+                        className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-lll-border bg-lll-bg-softer px-3 py-2 text-sm leading-tight text-lll-text-soft hover:text-lll-text"
                         title="Envía invitación o recovery para que pueda acceder"
                       >
+                        <AppIcon name="mail" className="h-4 w-4" />
                         Enviar acceso
                       </button>
                     )}
@@ -809,8 +848,9 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
                         <button
                           onClick={() => sendAccess(row.email)}
                           type="button"
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-lll-bg-softer"
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-lll-bg-softer"
                         >
+                          <AppIcon name="mail" className="h-4 w-4 text-lll-text-soft" />
                           Enviar acceso
                         </button>
 
@@ -818,8 +858,9 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
                           <button
                             onClick={() => archiveAndFreeEmail(row)}
                             type="button"
-                            className="w-full text-left px-3 py-2 text-sm hover:bg-lll-bg-softer"
+                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-lll-bg-softer"
                           >
+                            <AppIcon name="archive" className="h-4 w-4 text-lll-text-soft" />
                             Archivar
                           </button>
                         )}
@@ -827,8 +868,9 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
                         <button
                           onClick={() => handleDeletePerson(row)}
                           type="button"
-                          className="w-full text-left px-3 py-2 text-sm hover:bg-lll-bg-softer text-amber-200"
+                          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-amber-200 hover:bg-lll-bg-softer"
                         >
+                          <AppIcon name="trash" className="h-4 w-4" />
                           Eliminar
                         </button>
                       </div>
@@ -836,7 +878,8 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
                   </div>
                 </div>
               );
-            })
+            })}
+            </div>
           )}
         </div>
       </div>
@@ -848,6 +891,7 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
         onClose={closeEdit}
         onSave={saveEdit}
       />
+      </div>
     </UserLayout>
   );
 }

@@ -40,6 +40,8 @@ export type AbsenceRow = {
   // ✅ tipado fuerte
   subtype?: LicenseSubtype | null;
   hours?: number | null;
+  time_from?: string | null;
+  time_to?: string | null;
   notifyOwnerIds?: string[];
 };
 
@@ -63,6 +65,8 @@ export type Absence = {
   // ✅ tipado fuerte
   subtype?: LicenseSubtype | null;
   hours?: number | null;
+  timeFrom?: string | null;
+  timeTo?: string | null;
   notifyOwnerIds?: string[];
 };
 
@@ -77,6 +81,8 @@ export type CreateAbsenceInput = {
   // ✅ tipado fuerte
   subtype?: LicenseSubtype | null;
   hours?: number | null;
+  timeFrom?: string | null;
+  timeTo?: string | null;
   notifyOwnerIds?: string[];
 };
 
@@ -89,6 +95,8 @@ export type UpdateAbsenceInput = {
   // ✅ tipado fuerte
   subtype?: LicenseSubtype | null;
   hours?: number | null;
+  timeFrom?: string | null;
+  timeTo?: string | null;
 };
 
 export function mapRowToAbsence(
@@ -106,6 +114,8 @@ export function mapRowToAbsence(
 
     subtype: r.subtype ?? null,
     hours: r.hours ?? null,
+    timeFrom: r.time_from ?? null,
+    timeTo: r.time_to ?? null,
 
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -126,7 +136,7 @@ export async function listMyAbsences(userId: string): Promise<Absence[]> {
     .order("created_at", { ascending: false });
 
   if (error) throw error;
-  return (data as any[]).map((row) => mapRowToAbsence(row));
+  return ((data ?? []) as AbsenceRow[]).map((row) => mapRowToAbsence(row));
 }
 
 export async function listAllAbsencesForOwner(): Promise<Absence[]> {
@@ -136,11 +146,11 @@ export async function listAllAbsencesForOwner(): Promise<Absence[]> {
     .order("created_at", { ascending: false });
 
   if (error) throw error;
-  return (data as any[]).map((row) => mapRowToAbsence(row));
+  return ((data ?? []) as AbsenceRow[]).map((row) => mapRowToAbsence(row));
 }
 
 export async function createAbsence(input: CreateAbsenceInput): Promise<Absence> {
-  const payload: Record<string, any> = {
+  const payload: Record<string, unknown> = {
     user_id: input.userId,
     user_name: input.userName,
     type: input.type,
@@ -150,6 +160,8 @@ export async function createAbsence(input: CreateAbsenceInput): Promise<Absence>
     note: input.note ?? null,
     subtype: input.subtype ?? null,
     hours: input.hours ?? null,
+    time_from: input.timeFrom ?? null,
+    time_to: input.timeTo ?? null,
   };
 
   if (input.notifyOwnerIds?.length) {
@@ -165,7 +177,7 @@ export async function createAbsence(input: CreateAbsenceInput): Promise<Absence>
   if (error) throw error;
 
   // OJO: acá decided_by_profile no va a venir (está bien)
-  return mapRowToAbsence(data as any);
+  return mapRowToAbsence(data as AbsenceRow);
 }
 
 
@@ -236,7 +248,7 @@ export async function approveAbsence(
     });
 
     if (error) {
-      const msg = (error as any)?.message ?? "";
+      const msg = error.message ?? "";
       if (msg.toLowerCase().includes("saldo insuficiente")) {
         throw new Error("Saldo insuficiente para aprobar estas vacaciones.");
       }
@@ -292,13 +304,15 @@ export async function updateAbsence(id: string, input: UpdateAbsenceInput): Prom
 
       subtype: input.subtype ?? null,
       hours: input.hours ?? null,
+      time_from: input.timeFrom ?? null,
+      time_to: input.timeTo ?? null,
     })
     .eq("id", id)
     .select(ABSENCE_SELECT_WITH_DECIDER)
     .single();
 
   if (error) throw error;
-  return mapRowToAbsence(data as any);
+  return mapRowToAbsence(data as AbsenceRow);
 }
 
 export async function deleteAbsence(id: string) {
