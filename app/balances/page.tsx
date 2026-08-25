@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import UserLayout from "@/components/layout/UserLayout";
 import BalanceDonut from "@/components/balances/BalanceDonut";
 import BalanceBar from "@/components/balances/BalanceBar";
+import BalanceHistory from "@/components/balances/BalanceHistory";
 import BalancesSkeleton from "@/components/balances/BalancesSkeleton";
 import { AppIcon } from "@/components/ui/AppIcon";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -24,6 +25,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { computeBalanceStatsByKey, buildHistoryRows } from "@/lib/balances/stats";
 import { POLICIES, type BalanceKey, type PolicyUnit } from "@/lib/absencePolicies";
 import { getAbsenceTypeLabel } from "@/lib/absenceTypes";
+import { formatAR } from "@/lib/date";
 
 import { supabase } from "@/lib/supabase/client";
 import {
@@ -475,6 +477,14 @@ export default function BalancesPage() {
     return statsList.find((x) => x.balanceKey === selectedKey) ?? null;
   }, [selectedKey, statsList]);
 
+  const balanceLabels = useMemo(
+    () =>
+      Object.fromEntries(
+        statsList.map((item) => [item.balanceKey, item.label])
+      ) as Partial<Record<BalanceKey, string>>,
+    [statsList]
+  );
+
   const balancesReady = absencesLoaded && vacRpcResolved;
 
   return (
@@ -523,78 +533,32 @@ export default function BalancesPage() {
           }
         />
 
-        <SectionCard
-          title="Período del informe"
-          description="Ajustá el corte para recalcular métricas e historial."
-          icon={<AppIcon name="calendar" className="h-4 w-4" />}
-        >
-          <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-[160px_260px_1fr]">
-            <FormField label="Año">
-              <input
-                className={formControlClassName}
-                type="number"
-                value={year}
-                onChange={(event) => setYear(Number(event.target.value))}
-              />
-            </FormField>
-
-            <FormField label="Mes">
-              <select
-                className={formControlClassName}
-                value={month0}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  setMonth0(value === "toDate" ? value : Number(value));
-                }}
-              >
-                <option value="toDate">Hasta mes actual</option>
-                {visibleMonths.map((monthIndex) => (
-                  <option key={monthIndex} value={monthIndex}>
-                    {new Date(2020, monthIndex, 1).toLocaleDateString("es-AR", { month: "long" })}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-
-            <div className="rounded-xl border border-lll-border bg-lll-bg-softer px-3 py-2 text-[12px] text-lll-text-soft">
-              Corte de vacaciones: <span className="text-lll-text">{periodAtISO}</span>
-              {vacModel === "october" ? (
-                <span className="ml-2 rounded-full border border-amber-400/30 bg-amber-500/10 px-2 py-0.5 text-amber-200">
-                  modelo octubre
-                </span>
-              ) : null}
-            </div>
-          </div>
-        </SectionCard>
-
       {/* Main */}
         {!balancesReady ? (
         <BalancesSkeleton />
       ) : (
-      <div className="lll-fade-in grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="lll-fade-in grid grid-cols-1 gap-4 xl:grid-cols-[340px_minmax(0,1fr)] xl:items-start">
         {/* Left: Políticas compactas */}
-        <div className="lg:col-span-1">
-          <div className="rounded-2xl border border-lll-border bg-lll-bg-soft overflow-hidden">
+        <div>
+          <section className="overflow-hidden rounded-2xl border border-lll-border bg-lll-bg-soft">
             {/* Header sticky */}
-            <div className="sticky top-0 z-10 bg-lll-bg-soft/95 backdrop-blur border-b border-lll-border p-4">
+            <div className="border-b border-lll-border bg-gradient-to-br from-emerald-400/[0.07] via-lll-bg-soft to-lll-bg-soft p-4">
               <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="flex items-center gap-2 text-sm font-semibold">
-                    <AppIcon name="policy" className="h-4 w-4 text-emerald-300" />
-                    Políticas
-                  </p>
-                  <p className="text-[12px] text-lll-text-soft truncate">Tocá una para ver el detalle</p>
+                <div className="flex min-w-0 items-start gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-emerald-300/20 bg-emerald-300/10 text-emerald-300">
+                    <AppIcon name="policy" className="h-[18px] w-[18px]" />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="text-sm font-semibold">Políticas disponibles</h2>
+                    <p className="mt-0.5 truncate text-[11px] text-lll-text-soft">
+                      Seleccioná una para ver su composición.
+                    </p>
+                  </div>
                 </div>
 
-                <label className="flex items-center gap-2 text-[12px] text-lll-text-soft shrink-0">
-                  <input
-                    type="checkbox"
-                    className="accent-[color:var(--lll-accent)]"
-                    checked={showAll}
-                    onChange={(e) => setShowAll(e.target.checked)}
-                  />
-                  Mostrar todas
-                </label>
+                <span className="shrink-0 rounded-full border border-lll-border bg-lll-bg-softer px-2.5 py-1 text-[10px] text-lll-text-soft">
+                  {filteredStatsList.length}/{statsList.length}
+                </span>
               </div>
 
               <div className="mt-3">
@@ -604,20 +568,31 @@ export default function BalancesPage() {
                   placeholder="Buscar política…"
                   className="w-full"
                 />
-                <p className="mt-2 text-[12px] text-lll-text-soft">
-                  {filteredStatsList.length} visible(s)
-                  {hiddenCount > 0 ? ` · ${hiddenCount} oculta(s)` : ""}
-                </p>
-                {!showAll && !q.trim() && (
-                  <p className="mt-1 text-[11px] text-lll-text-soft">
-                    Mostrando solo con cupo y disponible &gt; 0 (para acortar).
+                <div className="mt-2 flex items-center justify-between gap-3">
+                  <p className="text-[10px] text-lll-text-soft">
+                    {q.trim()
+                      ? `${filteredStatsList.length} resultado${filteredStatsList.length === 1 ? "" : "s"}`
+                      : hiddenCount > 0
+                        ? `${hiddenCount} política${hiddenCount === 1 ? " oculta" : "s ocultas"}`
+                        : "Todas las políticas visibles"}
                   </p>
-                )}
+                  <button
+                    type="button"
+                    onClick={() => setShowAll((value) => !value)}
+                    className={`rounded-full border px-2.5 py-1 text-[10px] transition ${
+                      showAll
+                        ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
+                        : "border-lll-border bg-lll-bg-softer text-lll-text-soft hover:text-lll-text"
+                    }`}
+                  >
+                    {showAll ? "Ver con saldo" : "Mostrar todas"}
+                  </button>
+                </div>
               </div>
             </div>
 
             {/* Scroll list */}
-            <div className="p-3 max-h-[70vh] overflow-y-auto space-y-3">
+            <div className="max-h-[720px] space-y-2 overflow-y-auto p-3 scrollbar-thin">
               {statsList.length === 0 && (
                 <div className="rounded-2xl border border-lll-border bg-lll-bg-softer">
                   <EmptyState
@@ -649,31 +624,43 @@ export default function BalancesPage() {
                     key={s.balanceKey}
                     type="button"
                     onClick={() => setSelectedKey(s.balanceKey)}
-                    className={`w-full text-left rounded-2xl border p-4 transition ${
+                    aria-pressed={active}
+                    className={`group w-full rounded-xl border p-3.5 text-left transition ${
                       active
-                        ? "border-lll-accent/60 bg-lll-accent-soft"
-                        : "border-lll-border bg-lll-bg-soft hover:bg-lll-bg-softer"
+                        ? "border-emerald-400/35 bg-emerald-400/[0.075] shadow-[inset_3px_0_0_rgba(52,211,153,0.75)]"
+                        : "border-lll-border bg-lll-bg-softer/55 hover:border-white/15 hover:bg-lll-bg-softer"
                     }`}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-sm font-semibold leading-tight truncate">{s.label}</p>
-                        <p className="mt-1 text-[12px] text-lll-text-soft">
-                          Cupo: {s.allowance == null ? "—" : `${s.allowance}${unit}`}
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`h-2 w-2 shrink-0 rounded-full ${
+                              s.available == null
+                                ? "bg-sky-300"
+                                : s.available > 0
+                                  ? "bg-emerald-400"
+                                  : "bg-lll-text-soft/40"
+                            }`}
+                          />
+                          <p className="truncate text-sm font-semibold leading-tight">{s.label}</p>
+                        </div>
+                        <p className="mt-1.5 pl-4 text-[11px] text-lll-text-soft">
+                          {s.allowance == null ? "Sin límite definido" : `Cupo total: ${s.allowance}${unit}`}
                         </p>
                         {s.balanceKey === "VACATION_DAYS" && seniorityLabel ? (
-                          <p className="mt-1 text-[12px] text-lll-text-soft">
-                            Antiguedad: <span className="text-lll-text">{seniorityLabel}</span>
+                          <p className="mt-1 pl-4 text-[11px] text-lll-text-soft">
+                            Antigüedad: <span className="text-lll-text">{seniorityLabel}</span>
                           </p>
                         ) : null}
                       </div>
 
-                      <div className="text-right shrink-0">
-                        <p className="text-[11px] text-lll-text-soft">Disponible</p>
-                        <p className="text-[clamp(1.125rem,4vw,1.25rem)] font-bold leading-none">
+                      <div className="shrink-0 text-right">
+                        <p className="text-[10px] uppercase tracking-[0.08em] text-lll-text-soft">Disponible</p>
+                        <p className="mt-1 text-lg font-semibold leading-none text-emerald-200">
                           {s.available == null ? "—" : s.available}
                           {s.allowance == null ? null : (
-                            <span className="ml-1 text-[12px] font-semibold text-lll-text-soft">
+                            <span className="ml-1 text-[10px] font-medium text-lll-text-soft">
                               {unit}
                             </span>
                           )}
@@ -692,60 +679,76 @@ export default function BalancesPage() {
                 );
               })}
             </div>
-          </div>
+          </section>
         </div>
 
         {/* Right: detalle + donut + KPIs */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className="min-w-0 space-y-4">
           {selected ? (
-            <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
-              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                <div className="min-w-0">
-                  <p className="flex items-center gap-2 text-sm font-semibold">
-                    <AppIcon name="balance" className="h-4 w-4 text-emerald-300" />
-                    Detalle
-                  </p>
-                  <p className="mt-1 text-[clamp(1rem,3.5vw,1.125rem)] font-bold leading-tight truncate">{selected.label}</p>
-                  <p className="mt-1 text-[12px] text-lll-text-soft">
-                    Unidad: {fmtUnit(selected.unit)} · Cupo:{" "}
-                    {selected.allowance == null
-                      ? "—"
-                      : `${selected.allowance}${fmtUnit(selected.unit)}`}
-                  </p>
-                  {selected.balanceKey === "VACATION_DAYS" && seniorityLabel ? (
-                    <p className="mt-1 text-[12px] text-lll-text-soft">
-                      Antiguedad: <span className="text-lll-text">{seniorityLabel}</span>
-                    </p>
-                  ) : null}
-                </div>
+            <section className="overflow-hidden rounded-2xl border border-lll-border bg-lll-bg-soft">
+              <header
+                className={`border-b border-lll-border p-4 sm:p-5 ${
+                  selected.balanceKey === "VACATION_DAYS"
+                    ? "bg-gradient-to-br from-cyan-400/[0.09] via-transparent to-transparent"
+                    : "bg-gradient-to-br from-emerald-400/[0.07] via-transparent to-transparent"
+                }`}
+              >
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-emerald-300/20 bg-emerald-300/10 text-emerald-300">
+                      <AppIcon
+                        name={selected.balanceKey === "VACATION_DAYS" ? "calendar" : "balance"}
+                        className="h-5 w-5"
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] uppercase tracking-[0.12em] text-lll-text-soft">
+                        Detalle de la política
+                      </p>
+                      <h2 className="mt-1 truncate text-lg font-semibold leading-tight">
+                        {selected.label}
+                      </h2>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <span className="rounded-full border border-lll-border bg-lll-bg-softer px-2.5 py-1 text-[10px] text-lll-text-soft">
+                          {selected.allowance == null
+                            ? "Sin límite"
+                            : `Cupo ${selected.allowance}${fmtUnit(selected.unit)}`}
+                        </span>
+                        {seniorityLabel ? (
+                          <span className="rounded-full border border-cyan-400/25 bg-cyan-400/[0.08] px-2.5 py-1 text-[10px] text-cyan-100">
+                            Antigüedad {seniorityLabel}
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
 
-                <div className="grid grid-cols-3 gap-2 w-full md:w-auto">
-                  <div className="rounded-xl border border-lll-border bg-lll-bg-softer px-3 py-2">
-                    <p className="text-[11px] text-lll-text-soft">Disponible</p>
-                    <p className="text-[clamp(1rem,3.5vw,1.125rem)] font-bold leading-tight">
-                      {selected.available == null
-                        ? "—"
-                        : `${selected.available}${fmtUnit(selected.unit)}`}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-lll-border bg-lll-bg-softer px-3 py-2">
-                    <p className="text-[11px] text-lll-text-soft">Usado</p>
-                    <p className="text-[clamp(1rem,3.5vw,1.125rem)] font-bold leading-tight">
-                      {selected.used}
-                      {fmtUnit(selected.unit)}
-                    </p>
-                  </div>
-                  <div className="rounded-xl border border-lll-border bg-lll-bg-softer px-3 py-2">
-                    <p className="text-[11px] text-lll-text-soft">Reservado</p>
-                    <p className="text-[clamp(1rem,3.5vw,1.125rem)] font-bold leading-tight">
-                      {selected.reserved}
-                      {fmtUnit(selected.unit)}
-                    </p>
+                  <div className="grid w-full grid-cols-3 gap-2 lg:w-auto">
+                    <div className="min-w-0 rounded-xl border border-emerald-400/20 bg-emerald-400/[0.07] px-3 py-2.5 lg:min-w-24">
+                      <p className="truncate text-[10px] uppercase tracking-[0.08em] text-emerald-100/70">Disponible</p>
+                      <p className="mt-1 text-lg font-semibold leading-tight text-emerald-200">
+                        {selected.available == null
+                          ? "—"
+                          : `${selected.available}${fmtUnit(selected.unit)}`}
+                      </p>
+                    </div>
+                    <div className="min-w-0 rounded-xl border border-rose-400/20 bg-rose-400/[0.06] px-3 py-2.5 lg:min-w-24">
+                      <p className="truncate text-[10px] uppercase tracking-[0.08em] text-rose-100/70">Usado</p>
+                      <p className="mt-1 text-lg font-semibold leading-tight text-rose-200">
+                        {selected.used}{fmtUnit(selected.unit)}
+                      </p>
+                    </div>
+                    <div className="min-w-0 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] px-3 py-2.5 lg:min-w-24">
+                      <p className="truncate text-[10px] uppercase tracking-[0.08em] text-amber-100/70">Reservado</p>
+                      <p className="mt-1 text-lg font-semibold leading-tight text-amber-200">
+                        {selected.reserved}{fmtUnit(selected.unit)}
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
+              </header>
 
-              <div className="mt-4">
+              <div className="p-3 sm:p-4">
                 <BalanceDonut
                   used={selected.used}
                   reserved={selected.reserved}
@@ -754,7 +757,7 @@ export default function BalancesPage() {
                   unit={selected.unit}
                 />
               </div>
-            </div>
+            </section>
           ) : (
             <div className="rounded-2xl border border-lll-border bg-lll-bg-soft">
               <EmptyState
@@ -766,52 +769,54 @@ export default function BalancesPage() {
           )}
 
           {/* Historial */}
-          <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
-            <div className="flex items-center justify-between">
-              <p className="flex items-center gap-2 text-sm font-semibold">
-                <AppIcon name="clock" className="h-4 w-4 text-emerald-300" />
-                Historial
-              </p>
-              <p className="text-[12px] text-lll-text-soft">Incluye aprobadas + pendientes</p>
-            </div>
+          <BalanceHistory rows={history} balanceLabels={balanceLabels} />
 
-            <div className="mt-3 overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-[12px] text-lll-text-soft">
-                  <tr className="border-b border-lll-border">
-                    <th className="py-2 text-left">Desde</th>
-                    <th className="py-2 text-left">Hasta</th>
-                    <th className="py-2 text-left">Tipo</th>
-                    <th className="py-2 text-left">Estado</th>
-                    <th className="py-2 text-left">Balance</th>
-                    <th className="py-2 text-right">Cantidad</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.map((r) => (
-                    <tr key={r.id} className="border-b border-lll-border/60">
-                      <td className="py-2">{r.dateFrom}</td>
-                      <td className="py-2">{r.dateTo}</td>
-                      <td className="py-2">{r.type}</td>
-                      <td className="py-2">{r.status}</td>
-                      <td className="py-2">{r.balanceKey}</td>
-                      <td className="py-2 text-right">
-                        {r.amount} {fmtUnit(r.unit as PolicyUnit)}
-                      </td>
-                    </tr>
+          <SectionCard
+            title="Período del informe"
+            description="Ajustá el corte para recalcular métricas e historial."
+            icon={<AppIcon name="calendar" className="h-4 w-4" />}
+          >
+            <div className="grid grid-cols-1 items-end gap-3 md:grid-cols-[140px_220px_1fr]">
+              <FormField label="Año">
+                <input
+                  className={formControlClassName}
+                  type="number"
+                  value={year}
+                  onChange={(event) => setYear(Number(event.target.value))}
+                />
+              </FormField>
+
+              <FormField label="Mes">
+                <select
+                  className={formControlClassName}
+                  value={month0}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setMonth0(value === "toDate" ? value : Number(value));
+                  }}
+                >
+                  <option value="toDate">Hasta mes actual</option>
+                  {visibleMonths.map((monthIndex) => (
+                    <option key={monthIndex} value={monthIndex}>
+                      {new Date(2020, monthIndex, 1).toLocaleDateString("es-AR", {
+                        month: "long",
+                      })}
+                    </option>
                   ))}
+                </select>
+              </FormField>
 
-                  {history.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="py-6 text-center text-[12px] text-lll-text-soft">
-                        No hay movimientos en este período.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+              <div className="rounded-xl border border-lll-border bg-lll-bg-softer px-3 py-2 text-[12px] text-lll-text-soft">
+                Corte de vacaciones:{" "}
+                <span className="text-lll-text">{formatAR(periodAtISO)}</span>
+                {vacModel === "october" ? (
+                  <span className="ml-2 rounded-full border border-amber-400/30 bg-amber-500/10 px-2 py-0.5 text-amber-200">
+                    modelo octubre
+                  </span>
+                ) : null}
+              </div>
             </div>
-          </div>
+          </SectionCard>
         </div>
       </div>
         )}

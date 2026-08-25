@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useSyncExternalStore } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 import type { PolicyUnit } from "@/lib/absencePolicies";
+import { AppIcon } from "@/components/ui/AppIcon";
 import { Skeleton } from "@/components/ui/Skeleton";
 
 type Props = {
@@ -17,6 +18,8 @@ function unitShort(u: PolicyUnit) {
   return u === "hour" ? "h" : "d";
 }
 
+const subscribeToClient = () => () => undefined;
+
 export default function BalanceDonut({
   used,
   reserved,
@@ -24,109 +27,144 @@ export default function BalanceDonut({
   allowance,
   unit,
 }: Props) {
-  // ✅ evita width/height -1 por hydration / layout no medido aún
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useSyncExternalStore(
+    subscribeToClient,
+    () => true,
+    () => false
+  );
 
   const data = useMemo(() => {
     const safeUsed = Math.max(0, Number(used) || 0);
     const safeReserved = Math.max(0, Number(reserved) || 0);
 
-    // Si no hay cupo (allowance null o available null), mostramos Used vs Reserved
     if (allowance == null || available == null) {
       return [
-        { name: "Usado", value: safeUsed },
-        { name: "Reservado", value: safeReserved },
+        { name: "Usado", value: safeUsed, color: "#fb7185" },
+        { name: "Reservado", value: safeReserved, color: "#fbbf24" },
       ];
     }
 
     const safeAvailable = Math.max(0, Number(available) || 0);
 
     return [
-      { name: "Usado", value: safeUsed },
-      { name: "Reservado", value: safeReserved },
-      { name: "Disponible", value: safeAvailable },
+      { name: "Usado", value: safeUsed, color: "#fb7185" },
+      { name: "Reservado", value: safeReserved, color: "#fbbf24" },
+      { name: "Disponible", value: safeAvailable, color: "#34d399" },
     ];
   }, [used, reserved, available, allowance]);
 
-  const COLORS = ["#F59E0B", "#60A5FA", "#34D399"]; // usado / reservado / disponible
-
   const total = allowance ?? Math.max(0, (Number(used) || 0) + (Number(reserved) || 0));
+  const chartTotal = data.reduce((sum, item) => sum + item.value, 0);
+  const centerValue = available == null ? chartTotal : Math.max(0, Number(available) || 0);
 
   return (
-    <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold">Balance</p>
-        <span className="text-[12px] text-lll-text-soft">unidad: {unitShort(unit)}</span>
-      </div>
-
-      <div className="mt-4 w-full min-h-[220px] h-[220px]">
-        {mounted ? (
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Tooltip
-                wrapperStyle={{ outline: "none" }}
-                contentStyle={{
-                  borderRadius: 12,
-                  border: "1px solid rgba(255,255,255,0.10)",
-                  background: "rgba(10,10,10,0.85)",
-                  color: "white",
-                }}
-                labelStyle={{ color: "white" }}
-                itemStyle={{ color: "white" }}
-              />
-              <Pie
-                data={data}
-                dataKey="value"
-                innerRadius={60}
-                outerRadius={90}
-                paddingAngle={2}
-                stroke="transparent"
-                isAnimationActive
-                animationBegin={120}
-                animationDuration={900}
-                animationEasing="ease-out"
-              >
-                {data.map((_, i) => (
-                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                ))}
-              </Pie>
-            </PieChart>
-          </ResponsiveContainer>
-        ) : (
-          <div className="flex h-full w-full items-center justify-center" role="status">
-            <Skeleton className="h-44 w-44 rounded-full" />
-            <span className="sr-only">Preparando gráfico...</span>
+    <section className="overflow-hidden rounded-2xl border border-lll-border bg-lll-bg-softer">
+      <header className="flex items-center justify-between gap-3 border-b border-lll-border px-4 py-3.5">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-emerald-300/20 bg-emerald-300/10 text-emerald-300">
+            <AppIcon name="balance" className="h-4 w-4" />
           </div>
-        )}
+          <div>
+            <h3 className="text-sm font-semibold">Distribución del saldo</h3>
+            <p className="mt-0.5 text-[11px] text-lll-text-soft">
+              Total de la política: {total} {unitShort(unit)}
+            </p>
+          </div>
+        </div>
+        <span className="rounded-full border border-lll-border bg-lll-bg px-2.5 py-1 text-[10px] uppercase tracking-[0.08em] text-lll-text-soft">
+          {unit === "hour" ? "Horas" : "Días"}
+        </span>
+      </header>
+
+      <div className="grid items-center gap-2 p-4 sm:grid-cols-[minmax(220px,1.15fr)_minmax(180px,0.85fr)] sm:p-5">
+        <div className="relative mx-auto h-[230px] w-full max-w-[340px]">
+          {mounted ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Tooltip
+                  wrapperStyle={{ outline: "none" }}
+                  contentStyle={{
+                    borderRadius: 12,
+                    border: "1px solid rgba(255,255,255,0.10)",
+                    background: "rgba(9,14,28,0.96)",
+                    color: "white",
+                    boxShadow: "0 18px 48px rgba(0,0,0,.28)",
+                  }}
+                  labelStyle={{ color: "white" }}
+                  itemStyle={{ color: "white" }}
+                />
+                <Pie
+                  data={data}
+                  dataKey="value"
+                  innerRadius={70}
+                  outerRadius={96}
+                  paddingAngle={3}
+                  cornerRadius={5}
+                  stroke="transparent"
+                  isAnimationActive
+                  animationBegin={80}
+                  animationDuration={700}
+                  animationEasing="ease-out"
+                >
+                  {data.map((item) => (
+                    <Cell key={item.name} fill={item.color} />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="flex h-full w-full items-center justify-center" role="status">
+              <Skeleton className="h-44 w-44 rounded-full" />
+              <span className="sr-only">Preparando gráfico...</span>
+            </div>
+          )}
+
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+            <p className="text-[10px] uppercase tracking-[0.12em] text-lll-text-soft">
+              {available == null ? "Registrado" : "Disponible"}
+            </p>
+            <p className="mt-1 text-3xl font-semibold leading-none text-lll-text">
+              {centerValue}
+              <span className="ml-1 text-xs font-medium text-lll-text-soft">
+                {unitShort(unit)}
+              </span>
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          {data.map((item) => {
+            const percentage = chartTotal > 0 ? Math.round((item.value / chartTotal) * 100) : 0;
+            return (
+              <div
+                key={item.name}
+                className="flex items-center justify-between gap-3 rounded-xl border border-lll-border bg-lll-bg px-3 py-3"
+              >
+                <div className="flex min-w-0 items-center gap-2.5">
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: item.color }}
+                  />
+                  <div className="min-w-0">
+                    <p className="truncate text-[12px] text-lll-text-soft">{item.name}</p>
+                    <p className="mt-0.5 text-sm font-semibold">
+                      {item.value} {unitShort(unit)}
+                    </p>
+                  </div>
+                </div>
+                <span className="text-[11px] text-lll-text-soft">{percentage}%</span>
+              </div>
+            );
+          })}
+
+          {allowance == null ? (
+            <div className="flex items-start gap-2 rounded-xl border border-sky-400/20 bg-sky-400/[0.06] px-3 py-2.5 text-[11px] leading-4 text-sky-100/80">
+              <AppIcon name="info" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              Esta política no tiene un cupo máximo definido.
+            </div>
+          ) : null}
+        </div>
       </div>
-
-      <div className="mt-2 grid grid-cols-3 gap-2 text-[12px]">
-        <div className="rounded-xl border border-lll-border bg-lll-bg-softer p-2">
-          <p className="text-lll-text-soft">Usado</p>
-          <p className="font-semibold">
-            {Math.max(0, Number(used) || 0)} {unitShort(unit)}
-          </p>
-        </div>
-
-        <div className="rounded-xl border border-lll-border bg-lll-bg-softer p-2">
-          <p className="text-lll-text-soft">Reservado</p>
-          <p className="font-semibold">
-            {Math.max(0, Number(reserved) || 0)} {unitShort(unit)}
-          </p>
-        </div>
-
-        <div className="rounded-xl border border-lll-border bg-lll-bg-softer p-2">
-          <p className="text-lll-text-soft">Disponible</p>
-          <p className="font-semibold">
-            {available == null ? "—" : `${Math.max(0, Number(available) || 0)} ${unitShort(unit)}`}
-          </p>
-        </div>
-      </div>
-
-      <p className="mt-2 text-[12px] text-lll-text-soft">
-        Total política: {total ?? "—"} {unitShort(unit)}
-      </p>
-    </div>
+    </section>
   );
 }

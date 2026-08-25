@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import BalanceDonut from "@/components/balances/BalanceDonut";
 import BalanceBar from "@/components/balances/BalanceBar";
+import BalanceHistory from "@/components/balances/BalanceHistory";
 import BalancesSkeleton from "@/components/balances/BalancesSkeleton";
 
 import { useAbsences } from "@/contexts/AbsencesContext";
@@ -36,9 +37,9 @@ function downloadCSV(filename: string, csv: string) {
   URL.revokeObjectURL(url);
 }
 
-function toCSV(rows: any[]) {
-  const esc = (v: any) => {
-    const s = String(v ?? "");
+function toCSV(rows: Record<string, unknown>[]) {
+  const esc = (value: unknown) => {
+    const s = String(value ?? "");
     if (s.includes('"') || s.includes(",") || s.includes("\n")) return `"${s.replace(/"/g, '""')}"`;
     return s;
   };
@@ -351,7 +352,9 @@ export default function BalancesView({
       label:
         p.type === "licencia"
           ? getAbsenceTypeLabel("licencia", p.subtype ?? null)
-          : getAbsenceTypeLabel(p.type as any),
+          : getAbsenceTypeLabel(
+              p.type as Parameters<typeof getAbsenceTypeLabel>[0]
+            ),
     }));
 
     const byKey = new Map<BalanceKey, (typeof rows)[number]>();
@@ -483,6 +486,14 @@ export default function BalancesView({
     return statsList.find((x) => x.balanceKey === selectedKey) ?? null;
   }, [selectedKey, statsList]);
 
+  const balanceLabels = useMemo(
+    () =>
+      Object.fromEntries(
+        statsList.map((item) => [item.balanceKey, item.label])
+      ) as Partial<Record<BalanceKey, string>>,
+    [statsList]
+  );
+
   const showVacInfo = (key: BalanceKey) => key === "VACATION_DAYS";
   const balancesReady = hasLoadedAllAbsences && vacResolved;
 
@@ -557,9 +568,9 @@ export default function BalancesView({
       {!balancesReady ? (
         <BalancesSkeleton />
       ) : (
-      <div className="lll-fade-in mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="lll-fade-in mt-4 grid grid-cols-1 gap-4 xl:grid-cols-[340px_minmax(0,1fr)] xl:items-start">
         {/* Left */}
-        <div className="lg:col-span-1">
+        <div>
           <div className="rounded-2xl border border-lll-border bg-lll-bg-soft overflow-hidden">
             <div className="sticky top-0 z-10 bg-lll-bg-soft/95 backdrop-blur border-b border-lll-border p-4">
               <div className="flex items-center justify-between gap-3">
@@ -600,7 +611,7 @@ export default function BalancesView({
               </div>
             </div>
 
-            <div className="p-3 max-h-[70vh] overflow-y-auto space-y-3">
+            <div className="max-h-[720px] space-y-2 overflow-y-auto p-3 scrollbar-thin">
               {filteredStatsList.map((s) => {
                 const active = selectedKey === s.balanceKey;
                 const unit = fmtUnit(s.unit);
@@ -610,9 +621,9 @@ export default function BalancesView({
                     key={s.balanceKey}
                     type="button"
                     onClick={() => setSelectedKey(s.balanceKey)}
-                    className={`w-full text-left rounded-2xl border p-4 transition ${
+                    className={`w-full rounded-xl border p-3.5 text-left transition ${
                       active
-                        ? "border-lll-accent/60 bg-lll-accent-soft"
+                        ? "border-emerald-400/35 bg-emerald-400/[0.075] shadow-[inset_3px_0_0_rgba(52,211,153,0.75)]"
                         : "border-lll-border bg-lll-bg-soft hover:bg-lll-bg-softer"
                     }`}
                   >
@@ -678,7 +689,7 @@ export default function BalancesView({
         </div>
 
         {/* Right */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className="min-w-0 space-y-4">
           {selected ? (
             <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
               <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -764,49 +775,7 @@ export default function BalancesView({
           )}
 
           {/* Historial */}
-          <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold">Historial</p>
-              <p className="text-[12px] text-lll-text-soft">Incluye aprobadas + pendientes</p>
-            </div>
-
-            <div className="mt-3 overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-[12px] text-lll-text-soft">
-                  <tr className="border-b border-lll-border">
-                    <th className="py-2 text-left">Desde</th>
-                    <th className="py-2 text-left">Hasta</th>
-                    <th className="py-2 text-left">Tipo</th>
-                    <th className="py-2 text-left">Estado</th>
-                    <th className="py-2 text-left">Balance</th>
-                    <th className="py-2 text-right">Cantidad</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {history.map((r) => (
-                    <tr key={r.id} className="border-b border-lll-border/60">
-                      <td className="py-2">{r.dateFrom}</td>
-                      <td className="py-2">{r.dateTo}</td>
-                      <td className="py-2">{r.type}</td>
-                      <td className="py-2">{r.status}</td>
-                      <td className="py-2">{r.balanceKey}</td>
-                      <td className="py-2 text-right">
-                        {r.amount} {fmtUnit(r.unit as PolicyUnit)}
-                      </td>
-                    </tr>
-                  ))}
-
-                  {history.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="py-6 text-center text-[12px] text-lll-text-soft">
-                        No hay movimientos en este período 📭
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <BalanceHistory rows={history} balanceLabels={balanceLabels} />
 
           {!startDateISO ? (
             <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4 text-[12px] text-lll-text-soft">

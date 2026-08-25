@@ -30,8 +30,9 @@ export default function BalanceBar({
 }) {
   if (allowance == null) {
     return (
-      <div className="mt-3 rounded-xl border border-lll-border bg-lll-bg-softer px-3 py-2 text-[12px] text-lll-text-soft">
-        Sin cupo definido
+      <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-dashed border-lll-border bg-white/[0.015] px-2.5 py-2 text-[10px] text-lll-text-soft">
+        <span>Sin límite definido</span>
+        <span>{used + reserved}{fmtUnit(unit)} registrados</span>
       </div>
     );
   }
@@ -45,30 +46,39 @@ export default function BalanceBar({
 
   return (
     <div className="mt-3">
-      <div className="h-2 w-full overflow-hidden rounded-full bg-lll-bg-softer border border-lll-border">
+      <div
+        className="h-1.5 w-full overflow-hidden rounded-full bg-lll-bg border border-lll-border"
+        aria-label={`Usado ${used}${fmtUnit(unit)}, reservado ${reserved}${fmtUnit(unit)}, disponible ${av}${fmtUnit(unit)}`}
+      >
         <div className="lll-progress-reveal h-full flex">
           <div
-            className="h-full bg-orange-400/90"
+            className="h-full bg-rose-400"
             style={{ width: `${usedP}%` }}
-            aria-label="Usado"
           />
           <div
-            className="h-full bg-sky-400/80"
+            className="h-full bg-amber-300"
             style={{ width: `${resP}%` }}
-            aria-label="Reservado"
           />
           <div
-            className="h-full bg-lll-accent"
+            className="h-full bg-emerald-400"
             style={{ width: `${avP}%` }}
-            aria-label="Disponible"
           />
         </div>
       </div>
 
-      <div className="mt-2 flex items-center justify-between text-[12px] text-lll-text-soft">
-        <span>Usado: {used}{fmtUnit(unit)}</span>
-        <span>Reservado: {reserved}{fmtUnit(unit)}</span>
-        <span>Disponible: {av}{fmtUnit(unit)}</span>
+      <div className="mt-2 grid grid-cols-3 gap-2 text-[10px] text-lll-text-soft">
+        <span className="flex items-center gap-1.5 truncate">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-rose-400" />
+          {used}{fmtUnit(unit)} usado
+        </span>
+        <span className="flex items-center justify-center gap-1.5 truncate">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-300" />
+          {reserved}{fmtUnit(unit)} reservado
+        </span>
+        <span className="flex items-center justify-end gap-1.5 truncate">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+          {av}{fmtUnit(unit)} libre
+        </span>
       </div>
     </div>
   );
