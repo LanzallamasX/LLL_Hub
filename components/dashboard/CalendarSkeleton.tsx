@@ -1,13 +1,21 @@
 import { Skeleton } from "@/components/ui/Skeleton";
 
-export default function CalendarSkeleton() {
+export default function CalendarSkeleton({
+  calendarRight = false,
+}: {
+  calendarRight?: boolean;
+}) {
   return (
     <div
       className="grid grid-cols-1 gap-4 lg:grid-cols-3"
       role="status"
       aria-label="Cargando calendario"
     >
-      <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4 lg:col-span-2">
+      <div
+        className={`rounded-2xl border border-lll-border bg-lll-bg-soft p-4 lg:col-span-2 ${
+          calendarRight ? "order-2" : "order-1"
+        }`}
+      >
         <div className="flex items-center justify-between gap-4">
           <div className="space-y-2">
             <Skeleton className="h-4 w-36" />
@@ -15,14 +23,18 @@ export default function CalendarSkeleton() {
           </div>
           <Skeleton className="h-10 w-48" />
         </div>
-        <div className="mt-5 grid grid-cols-7 gap-2">
-          {Array.from({ length: 35 }, (_, item) => (
-            <Skeleton key={item} className="h-20 w-full sm:h-24" />
+        <div className="mt-4 grid grid-cols-7 gap-1.5">
+          {Array.from({ length: 42 }, (_, item) => (
+            <Skeleton key={item} className="h-[82px] w-full rounded-xl" />
           ))}
         </div>
       </div>
 
-      <aside className="space-y-4 lg:col-span-1">
+      <aside
+        className={`space-y-4 lg:col-span-1 ${
+          calendarRight ? "order-1" : "order-2"
+        }`}
+      >
         {[0, 1, 2, 3].map((section) => (
           <div
             key={section}

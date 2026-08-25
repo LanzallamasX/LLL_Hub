@@ -1,10 +1,5 @@
-import { Suspense } from "react";
-import OwnerDashboardPageClient from "./OwnerDashboardPageClient";
+import OwnerCalendarPage from "../calendar/page";
 
 export default function OwnerDashboardPage() {
-  return (
-    <Suspense fallback={null}>
-      <OwnerDashboardPageClient />
-    </Suspense>
-  );
+  return <OwnerCalendarPage />;
 }

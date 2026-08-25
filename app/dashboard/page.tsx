@@ -9,17 +9,17 @@ import CalendarMonth from "@/components/dashboard/CalendarMonth";
 import AbsenceList from "@/components/dashboard/AbsenceList";
 import VacationBalanceCard from "@/components/dashboard/VacationBalanceCard";
 import { AppIcon } from "@/components/ui/AppIcon";
+import { PageSummary, SummaryChip, SummaryIcon } from "@/components/ui/PageSummary";
+import { SectionCard } from "@/components/ui/SectionCard";
 import { Skeleton } from "@/components/ui/Skeleton";
 
 import { useAbsences } from "@/contexts/AbsencesContext";
 import { useAuth } from "@/contexts/AuthContext";
 
 import { getAbsenceTypeLabel } from "@/lib/absenceTypes";
+import { getAbsenceTimeRangeLabel } from "@/lib/absences/timeRange";
 import { toDate00, formatAR, startOfTodayMs } from "@/lib/date";
 import type { Absence } from "@/lib/supabase/absences";
-
-import { computeVacationBalance } from "@/lib/vacations/calc";
-import { DEFAULT_VACATION_SETTINGS } from "@/lib/vacations/settings";
 
 import { computeUsageByBalanceKey } from "@/lib/balances/usage";
 
@@ -40,43 +40,54 @@ import { processPendingEmails } from "@/lib/email/processPendingEmails";
 function DashboardContentSkeleton() {
   return (
     <div
-      className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3"
+      className="grid grid-cols-1 gap-4 xl:grid-cols-12 xl:items-start"
       role="status"
       aria-label="Cargando contenido del dashboard"
     >
-      <div className="space-y-4 lg:col-span-1">
-        <div className="grid grid-cols-2 gap-4">
+      <div className="space-y-4 xl:col-span-4">
+        <div className="grid grid-cols-2 gap-3">
           {[0, 1].map((item) => (
             <div
               key={item}
-              className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4"
+              className="min-h-32 rounded-2xl border border-lll-border bg-lll-bg-soft p-4"
             >
-              <Skeleton className="h-3 w-20" />
-              <Skeleton className="mt-3 h-8 w-12" />
+              <div className="flex items-center justify-between gap-3">
+                <Skeleton className="h-3 w-20" />
+                <Skeleton className="h-9 w-9 rounded-xl" />
+              </div>
+              <Skeleton className="mt-4 h-8 w-14" />
               <Skeleton className="mt-3 h-3 w-4/5" />
             </div>
           ))}
         </div>
 
         <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
-          <Skeleton className="h-4 w-28" />
-          <Skeleton className="mt-4 h-16 w-full" />
-          <Skeleton className="mt-3 h-16 w-full" />
-          <Skeleton className="mt-3 h-16 w-full" />
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-8 w-8 rounded-lg" />
+            <div className="space-y-2">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-3 w-44" />
+            </div>
+          </div>
+          <Skeleton className="mt-4 h-24 w-full rounded-xl" />
         </div>
 
         <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
-          <Skeleton className="h-4 w-24" />
-          <Skeleton className="mt-3 h-3 w-5/6" />
-          <div className="mt-4 grid grid-cols-3 gap-3">
-            {[0, 1, 2].map((item) => (
-              <Skeleton key={item} className="h-20 w-full" />
-            ))}
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-8 w-8 rounded-lg" />
+            <Skeleton className="h-4 w-28" />
           </div>
+          <Skeleton className="mt-4 h-40 w-full rounded-xl" />
+        </div>
+
+        <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="mt-3 h-3 w-5/6" />
+          <Skeleton className="mt-4 h-28 w-full rounded-xl" />
         </div>
       </div>
 
-      <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4 lg:col-span-2">
+      <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4 xl:col-span-8">
         <div className="flex items-center justify-between gap-4">
           <div className="space-y-2">
             <Skeleton className="h-4 w-24" />
@@ -84,7 +95,11 @@ function DashboardContentSkeleton() {
           </div>
           <Skeleton className="h-10 w-44" />
         </div>
-        <Skeleton className="mt-5 h-[480px] w-full" />
+        <div className="mt-5 grid grid-cols-7 gap-2">
+          {Array.from({ length: 42 }, (_, item) => (
+            <Skeleton key={item} className="h-20 w-full rounded-xl" />
+          ))}
+        </div>
       </div>
 
       <span className="sr-only">Cargando dashboard...</span>
@@ -108,13 +123,12 @@ const { isoSet: holidaysISO } = useHolidays(year);
     absences,
     createAbsence,
     updateAbsence,
-    pendingCount,
     loadMyAbsences,
     hasLoadedMyAbsences,
     error: absError,
   } = useAbsences();
 
-  const { userId, email, fullName, isAuthed, isLoading, startDate } = useAuth();
+  const { userId, email, fullName, isAuthed, isLoading } = useAuth();
 
   const [{ year: viewYear, month: viewMonth }, setViewDate] = useState(() => {
     const now = new Date();
@@ -214,23 +228,6 @@ const { isoSet: holidaysISO } = useHolidays(year);
     return absences.filter((a) => a.userId === userId);
   }, [absences, userId]);
 
-  // ✅ Fallback client-side (por si aún no cargó el RPC)
-  const vacationBalanceFallback = useMemo(() => {
-    const currentYear = new Date().getFullYear();
-    return computeVacationBalance({
-      absences: myAbsences,
-      currentYear,
-      startDateISO: startDate,
-      settings: {
-        countMode: DEFAULT_VACATION_SETTINGS.countMode,
-        carryoverEnabled: DEFAULT_VACATION_SETTINGS.carryover.enabled,
-        carryoverMaxCycles: DEFAULT_VACATION_SETTINGS.carryover.maxCycles,
-      },
-    });
-  }, [myAbsences, startDate]);
-
-  // se puede borrar
-
   const myPendingCount = useMemo(
     () => myAbsences.filter((a) => a.status === "pendiente").length,
     [myAbsences]
@@ -239,8 +236,8 @@ const { isoSet: holidaysISO } = useHolidays(year);
   const nextAbsence = useMemo(() => {
     const today00 = startOfTodayMs();
     const upcoming = myAbsences
-      .map((a) => ({ a, from: toDate00(a.from) }))
-      .filter(({ from }) => from.getTime() >= today00)
+      .map((a) => ({ a, from: toDate00(a.from), to: toDate00(a.to) }))
+      .filter(({ a, to }) => a.status !== "rechazado" && to.getTime() >= today00)
       .sort((x, y) => x.from.getTime() - y.from.getTime());
 
     return upcoming[0]?.a ?? null;
@@ -261,7 +258,6 @@ const vacationInfoForModal = useMemo(() => {
 
 // obtener fecha desde el profile (start_date) para usarla en el modal 
 const [startDateISO, setStartDateISO] = useState<string | null>(null);
-  const [startDateLoading, setStartDateLoading] = useState(false);
 
   useEffect(() => {
     if (!isAuthed || !userId) return;
@@ -269,8 +265,6 @@ const [startDateISO, setStartDateISO] = useState<string | null>(null);
     let alive = true;
     (async () => {
       try {
-        setStartDateLoading(true);
-
         const { data, error } = await supabase
           .from("profiles")
           .select("start_date")
@@ -285,8 +279,6 @@ const [startDateISO, setStartDateISO] = useState<string | null>(null);
       } catch {
         if (!alive) return;
         setStartDateISO(null);
-      } finally {
-        if (alive) setStartDateLoading(false);
       }
     })();
 
@@ -298,6 +290,11 @@ const [startDateISO, setStartDateISO] = useState<string | null>(null);
   const dashboardContentReady = userId
     ? hasLoadedMyAbsences(userId) && (vacDb !== null || vacDbError !== null)
     : false;
+
+  const vacationAvailable = Number(vacDb?.available ?? 0);
+  const nextAbsenceTimeRange = nextAbsence
+    ? getAbsenceTimeRangeLabel(nextAbsence)
+    : null;
 
 
   // Gates
@@ -406,93 +403,164 @@ const [startDateISO, setStartDateISO] = useState<string | null>(null);
 
   return (
     <UserLayout mode="user" header={{ title: "Dashboard", subtitle: "Solicitudes, calendario e historial." }}>
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-[clamp(1.5rem,5vw,1.875rem)] font-semibold leading-tight">Dashboard</h1>
-          <p className="mt-1 text-sm text-lll-text-soft">
-            Tu vista personal: solicitudes, calendario y historial.
-          </p>
-          {dashboardContentReady ? (
-            <p className="lll-fade-in mt-1 text-[12px] text-lll-text-soft">
-              Equipo pendientes: {pendingCount} · Mis pendientes: {myPendingCount}
-            </p>
-          ) : (
-            <Skeleton className="mt-2 h-3 w-52" />
-          )}
+      <div className="mx-auto max-w-7xl space-y-4">
+        <PageSummary
+          leading={
+            <SummaryIcon tone="text-cyan-300">
+              <AppIcon name="absence" className="h-7 w-7" />
+            </SummaryIcon>
+          }
+          title="Tu espacio personal"
+          subtitle="Organizá tus solicitudes, revisá tus saldos y anticipá tus próximos días fuera."
+          meta={
+            dashboardContentReady ? (
+              <>
+                <SummaryChip>
+                  {myPendingCount} pendiente{myPendingCount === 1 ? "" : "s"}
+                </SummaryChip>
+                <SummaryChip>
+                  {vacDb ? `${vacationAvailable} días disponibles` : "Saldo no disponible"}
+                </SummaryChip>
+                <SummaryChip>
+                  {myAbsences.length} solicitud{myAbsences.length === 1 ? "" : "es"}
+                </SummaryChip>
+              </>
+            ) : (
+              <SummaryChip>Cargando tu información…</SummaryChip>
+            )
+          }
+          actions={
+            <button
+              onClick={openCreate}
+              className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-lll-accent px-4 py-2 text-sm font-semibold text-black transition hover:brightness-110 disabled:cursor-wait disabled:opacity-50"
+              type="button"
+              disabled={!dashboardContentReady}
+            >
+              <AppIcon name="plus" className="h-4 w-4" />
+              Nueva solicitud
+            </button>
+          }
+        />
 
-          {absError ? <p className="mt-1 text-[12px] text-red-300">{absError}</p> : null}
-        </div>
+        {absError ? (
+          <div
+            role="alert"
+            className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200"
+          >
+            {absError}
+          </div>
+        ) : null}
 
-        <button
-          onClick={openCreate}
-          className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-lll-accent px-4 py-2 text-sm font-semibold text-black transition hover:brightness-110 disabled:cursor-wait disabled:opacity-50"
-          type="button"
-          disabled={!dashboardContentReady}
-        >
-          <AppIcon name="plus" className="h-4 w-4" />
-          Nueva solicitud
-        </button>
-      </div>
+        {!dashboardContentReady ? (
+          <DashboardContentSkeleton />
+        ) : (
+          <div className="lll-fade-in grid grid-cols-1 gap-4 xl:grid-cols-12 xl:items-start">
+            <div className="space-y-4 xl:col-span-4">
+              <div className="grid grid-cols-2 gap-3">
+                <article className="min-h-32 rounded-2xl border border-amber-400/20 bg-gradient-to-br from-amber-400/[0.09] via-lll-bg-soft to-lll-bg-soft p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-amber-200/80">
+                      Pendientes
+                    </p>
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-amber-300/20 bg-amber-300/10 text-amber-200">
+                      <AppIcon name="clock" className="h-4 w-4" />
+                    </div>
+                  </div>
+                  <p className="mt-3 text-3xl font-semibold leading-none">{myPendingCount}</p>
+                  <p className="mt-2 text-[11px] leading-4 text-lll-text-soft">
+                    {myPendingCount === 0 ? "No tenés aprobaciones en espera." : "A la espera de aprobación."}
+                  </p>
+                </article>
 
-      {!dashboardContentReady ? (
-        <DashboardContentSkeleton />
-      ) : (
-      <div className="lll-fade-in mt-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-1 space-y-4">
-          <div className="space-y-4">
-            {/* Row 1: Cards chicas */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
-                <p className="text-[12px] text-lll-text-soft">Pendientes</p>
-                <p className="mt-2 text-[clamp(1.5rem,5vw,1.875rem)] font-semibold leading-tight">{myPendingCount}</p>
-                <p className="mt-1 text-[12px] text-lll-text-soft">A la espera de aprobación.</p>
+                <article className="min-h-32 rounded-2xl border border-cyan-400/20 bg-gradient-to-br from-cyan-400/[0.09] via-lll-bg-soft to-lll-bg-soft p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-cyan-200/80">
+                      Disponibles
+                    </p>
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-200">
+                      <AppIcon name="balance" className="h-4 w-4" />
+                    </div>
+                  </div>
+                  <p className="mt-3 text-3xl font-semibold leading-none">
+                    {vacDb ? vacationAvailable : "—"}
+                    {vacDb ? <span className="ml-1 text-xs font-medium text-lll-text-soft">días</span> : null}
+                  </p>
+                  <p className="mt-2 text-[11px] leading-4 text-lll-text-soft">Saldo actual de vacaciones.</p>
+                </article>
               </div>
 
-              <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-sm font-semibold">Próxima ausencia</p>
-                  <span className="text-[12px] px-2 py-1 rounded-full bg-lll-bg-softer border border-lll-border text-lll-text-soft">
-                    {nextAbsence ? getAbsenceTypeLabel(nextAbsence.type) : "—"}
-                  </span>
-                </div>
 
+              <AbsenceList absences={myAbsences} onEdit={openEdit} focusId={focusId} />
+              <VacationBalanceCard data={vacDb} loading={vacDbLoading} error={vacDbError} />
+
+              
+              <SectionCard
+                title="Próxima ausencia"
+                description="Tu siguiente solicitud aprobada o pendiente."
+                icon={<AppIcon name="calendar" className="h-4 w-4" />}
+                action={
+                  nextAbsence ? (
+                    <span
+                      className={`rounded-full border px-2.5 py-1 text-[11px] ${
+                        nextAbsence.status === "aprobado"
+                          ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
+                          : "border-amber-400/30 bg-amber-400/10 text-amber-200"
+                      }`}
+                    >
+                      {nextAbsence.status === "aprobado" ? "Aprobada" : "Pendiente"}
+                    </span>
+                  ) : null
+                }
+              >
                 {nextAbsence ? (
-                  <>
-                    <p className="mt-3 text-sm">
-                      {formatAR(nextAbsence.from)} → {formatAR(nextAbsence.to)}
-                    </p>
-                    <p className="mt-1 text-[12px] text-lll-text-soft">
-                      Estado: <span className="text-lll-text">{nextAbsence.status}</span>
-                    </p>
-                  </>
+                  <div className="rounded-xl border border-lll-border bg-lll-bg-softer p-3.5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold">
+                          {getAbsenceTypeLabel(nextAbsence.type, nextAbsence.subtype ?? null)}
+                        </p>
+                        <p className="mt-1.5 flex items-center gap-2 text-[12px] text-lll-text-soft">
+                          <AppIcon name="calendar" className="h-3.5 w-3.5 shrink-0" />
+                          <span>
+                            {formatAR(nextAbsence.from)}
+                            {nextAbsence.to !== nextAbsence.from ? ` → ${formatAR(nextAbsence.to)}` : ""}
+                          </span>
+                        </p>
+                        {nextAbsenceTimeRange ? (
+                          <p className="mt-1.5 flex items-center gap-2 text-[12px] text-lll-text-soft">
+                            <AppIcon name="clock" className="h-3.5 w-3.5 shrink-0" />
+                            <span>{nextAbsenceTimeRange}</span>
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
+                  </div>
                 ) : (
-                  <p className="mt-3 text-sm text-lll-text-soft">No tenés ausencias próximas.</p>
+                  <div className="rounded-xl border border-dashed border-lll-border bg-lll-bg-softer px-4 py-6 text-center">
+                    <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl border border-lll-border bg-lll-bg text-cyan-300">
+                      <AppIcon name="check" className="h-5 w-5" />
+                    </div>
+                    <p className="mt-3 text-sm font-medium">Agenda despejada</p>
+                    <p className="mt-1 text-[12px] text-lll-text-soft">No tenés ausencias próximas.</p>
+                  </div>
                 )}
-              </div>
+              </SectionCard>
             </div>
 
-            {/* List */}
-            <AbsenceList absences={myAbsences} onEdit={openEdit} focusId={focusId} />
-
-            {/* Vacaciones full width */}
-            <VacationBalanceCard
-              data={vacDb}
-              loading={vacDbLoading}
-              error={vacDbError}
-            />
+            <div className="xl:col-span-8">
+              <CalendarMonth
+                title="Tu calendario"
+                absences={myAbsences}
+                viewYear={viewYear}
+                viewMonth={viewMonth}
+                onPrevMonth={goPrevMonth}
+                onNextMonth={goNextMonth}
+                onToday={goToday}
+              />
+            </div>
           </div>
-        </div>
-
-        <CalendarMonth
-          absences={myAbsences}
-          viewYear={viewYear}
-          viewMonth={viewMonth}
-          onPrevMonth={goPrevMonth}
-          onNextMonth={goNextMonth}
-          onToday={goToday}
-        />
+        )}
       </div>
-      )}
 
 <NewAbsenceModal
   open={isModalOpen}
@@ -544,7 +612,22 @@ function DashboardLoading() {
         subtitle: "Tu vista personal de solicitudes, calendario y saldos.",
       }}
     >
-      <DashboardContentSkeleton />
+      <div className="mx-auto max-w-7xl space-y-4">
+        <section className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4 sm:p-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-4">
+              <Skeleton className="h-14 w-14 shrink-0 rounded-2xl" />
+              <div className="space-y-2">
+                <Skeleton className="h-5 w-44" />
+                <Skeleton className="h-3 w-72 max-w-full" />
+                <Skeleton className="h-6 w-48 rounded-full" />
+              </div>
+            </div>
+            <Skeleton className="h-10 w-40 rounded-lg" />
+          </div>
+        </section>
+        <DashboardContentSkeleton />
+      </div>
     </UserLayout>
   );
 }

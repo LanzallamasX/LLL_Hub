@@ -34,7 +34,7 @@ function notifIcon(type: string) {
 
 function routeForNotification(n: { type: string; entity_type: string | null; entity_id: string | null }) {
   if (n.entity_type === "absence" && n.entity_id) {
-    if (n.type === "absence_created") return `/owner/dashboard?focus=${n.entity_id}`;
+    if (n.type === "absence_created") return `/owner/requests?focus=${n.entity_id}`;
     if (n.type === "absence_approved" || n.type === "absence_rejected") return `/dashboard?focus=${n.entity_id}`;
   }
   return "/notifications";

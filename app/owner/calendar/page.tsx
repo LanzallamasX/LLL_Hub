@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import UserLayout from "@/components/layout/UserLayout";
 import CalendarMonth from "@/components/dashboard/CalendarMonth";
@@ -53,7 +53,7 @@ function AbsenceMiniRow({
 
   return (
     <Link
-      href={`/owner/dashboard?focus=${absence.id}`}
+      href={`/owner/requests?focus=${absence.id}`}
       className="group flex items-center justify-between gap-3 rounded-xl border border-lll-border bg-lll-bg-softer p-3 transition hover:bg-white/[0.05]"
     >
       <div className="flex min-w-0 items-center gap-3">
@@ -92,6 +92,8 @@ function AbsenceMiniRow({
 
 export default function OwnerCalendarPage() {
   const router = useRouter();
+  const pathname = usePathname();
+  const isDashboard = pathname.startsWith("/owner/dashboard");
   const { userId, isAuthed, role, isLoading } = useAuth();
   const { absences, loadAllAbsences, hasLoadedAllAbsences, error } = useAbsences();
 
@@ -218,19 +220,25 @@ export default function OwnerCalendarPage() {
     <UserLayout
       mode="owner"
       header={{
-        title: "Calendario",
-        subtitle: "Vista mensual de ausencias del equipo.",
+        title: isDashboard ? "Dashboard" : "Calendario",
+        subtitle: isDashboard
+          ? "Resumen operativo del equipo."
+          : "Vista mensual de ausencias del equipo.",
       }}
     >
       <div className="mx-auto max-w-7xl space-y-4">
         <PageSummary
           leading={
-            <SummaryIcon tone="text-orange-300">
-              <AppIcon name="calendar" className="h-7 w-7" />
+            <SummaryIcon tone={isDashboard ? "text-cyan-300" : "text-orange-300"}>
+              <AppIcon name={isDashboard ? "users" : "calendar"} className="h-7 w-7" />
             </SummaryIcon>
           }
-          title="Calendario del equipo"
-          subtitle="Anticipá ausencias, pendientes y disponibilidad de los próximos días."
+          title={isDashboard ? "Panel del equipo" : "Calendario del equipo"}
+          subtitle={
+            isDashboard
+              ? "Revisá pendientes, disponibilidad y próximos movimientos desde una sola vista."
+              : "Anticipá ausencias, pendientes y disponibilidad de los próximos días."
+          }
           meta={
             calendarLoaded ? (
               <>
@@ -244,7 +252,7 @@ export default function OwnerCalendarPage() {
           }
           actions={
             <Link
-              href="/owner/dashboard"
+              href="/owner/requests"
               className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-lll-border bg-lll-bg-softer px-3 py-2 text-sm text-lll-text-soft transition hover:text-lll-text"
             >
               <AppIcon name="absence" className="h-4 w-4" />
@@ -260,10 +268,10 @@ export default function OwnerCalendarPage() {
         ) : null}
 
         {!calendarLoaded ? (
-          <CalendarSkeleton />
+          <CalendarSkeleton calendarRight={isDashboard} />
         ) : (
           <div className="lll-fade-in grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <div className="lg:col-span-2">
+            <div className={`lg:col-span-2 ${isDashboard ? "order-2" : "order-1"}`}>
               <CalendarMonth
                 title="Calendario del equipo"
                 absences={teamAbsences}
@@ -276,7 +284,7 @@ export default function OwnerCalendarPage() {
               />
             </div>
 
-            <aside className="space-y-4 lg:col-span-1">
+            <aside className={`space-y-4 lg:col-span-1 ${isDashboard ? "order-1" : "order-2"}`}>
               <SectionCard
                 title="Pendientes"
                 description="Solicitudes que todavía requieren una decisión."

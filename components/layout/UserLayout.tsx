@@ -179,6 +179,7 @@ export default function UserLayout({
 
   // ====== ROUTES ======
   const dashboardHref = effectiveMode === "owner" ? "/owner/dashboard" : "/dashboard";
+  const ownerRequestsHref = "/owner/requests";
   const calendarHref = "/owner/calendar";
   const usersHref = "/owner/users";
   const ownerVacationPolicyHref = "/owner/vacation-policy";
@@ -197,6 +198,8 @@ export default function UserLayout({
       ? pathname === "/owner" || pathname.startsWith("/owner/dashboard")
       : pathname === "/dashboard" || pathname.startsWith("/dashboard");
 
+  const isOwnerRequestsActive =
+    effectiveMode === "owner" && pathname.startsWith("/owner/requests");
   const isCalendarActive = effectiveMode === "owner" && pathname.startsWith("/owner/calendar");
   const isUsersActive = effectiveMode === "owner" && pathname.startsWith("/owner/users");
   const isOwnerVacationPolicyActive =
@@ -233,14 +236,21 @@ export default function UserLayout({
             Principal
           </p>
 
-          {/* DASHBOARD / SOLICITUDES */}
+          {/* DASHBOARD */}
           <Link href={dashboardHref} className={navLinkClass(isDashboardActive)}>
-            <NavIcon
-              name={effectiveMode === "owner" ? "requests" : "dashboard"}
-              tone="text-lll-accent"
-            />
-            {effectiveMode === "owner" ? "Solicitudes" : "Dashboard"}
+            <NavIcon name="dashboard" tone="text-lll-accent" />
+            Dashboard
           </Link>
+
+          {effectiveMode === "owner" ? (
+            <Link
+              href={ownerRequestsHref}
+              className={navLinkClass(isOwnerRequestsActive)}
+            >
+              <NavIcon name="requests" tone="text-orange-400" />
+              Solicitudes
+            </Link>
+          ) : null}
 
           {/* BALANCES */}
           {effectiveMode === "owner" ? (
@@ -372,12 +382,20 @@ export default function UserLayout({
                 onClick={() => setMobileOpen(false)}
                 className={navLinkClass(isDashboardActive)}
               >
-                <NavIcon
-                  name={effectiveMode === "owner" ? "requests" : "dashboard"}
-                  tone="text-lll-accent"
-                />
-                {effectiveMode === "owner" ? "Solicitudes" : "Dashboard"}
+                <NavIcon name="dashboard" tone="text-lll-accent" />
+                Dashboard
               </Link>
+
+              {effectiveMode === "owner" ? (
+                <Link
+                  href={ownerRequestsHref}
+                  onClick={() => setMobileOpen(false)}
+                  className={navLinkClass(isOwnerRequestsActive)}
+                >
+                  <NavIcon name="requests" tone="text-orange-400" />
+                  Solicitudes
+                </Link>
+              ) : null}
 
               {effectiveMode === "owner" ? (
                 <>

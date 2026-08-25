@@ -28,8 +28,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+    <html lang="es" className="bg-lll-bg">
+      <body
+        className={`${geistSans.variable} ${geistMono.variable} bg-lll-bg text-lll-text antialiased`}
+      >
         <AuthProvider>
 
           <AbsencesProvider>{children}</AbsencesProvider>

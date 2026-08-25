@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import type { VacationBalance } from "@/lib/supabase/vacations";
+import { AppIcon } from "@/components/ui/AppIcon";
 import { Skeleton } from "@/components/ui/Skeleton";
 
 function fmt(n: number) {
@@ -33,24 +34,45 @@ export default function VacationBalanceCard({
     return { accrued, used, reserved, pending, available };
   }, [data]);
 
+  const availablePercent = summary?.accrued
+    ? Math.max(0, Math.min(100, (summary.available / summary.accrued) * 100))
+    : 0;
+
   return (
-    <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold">Vacaciones</p>
-          <p className="mt-1 text-[12px] text-lll-text-soft">
-            Acumulativas desde tu fecha de ingreso. Sin vencimiento. Disponible = Acumuladas − Usadas − Reservadas − Pendientes.
-          </p>
+    <section className="overflow-hidden rounded-2xl border border-lll-border bg-lll-bg-soft">
+      <div className="border-b border-lll-border bg-gradient-to-br from-cyan-400/[0.08] via-transparent to-transparent p-4 sm:p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-300">
+              <AppIcon name="balance" className="h-[18px] w-[18px]" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold">Balance de vacaciones</h2>
+              <p className="mt-1 text-[12px] leading-5 text-lll-text-soft">
+                Tu saldo acumulado y los días ya comprometidos.
+              </p>
+            </div>
+          </div>
+
+          {!loading && summary ? (
+            <div className="shrink-0 text-right">
+              <p className="text-[10px] uppercase tracking-[0.12em] text-lll-text-soft">Disponible</p>
+              <p className="mt-1 text-2xl font-semibold leading-none text-cyan-200">
+                {fmt(summary.available)}{" "}
+                <span className="text-xs font-medium text-lll-text-soft">d</span>
+              </p>
+            </div>
+          ) : null}
         </div>
       </div>
 
       {loading ? (
         <div
-          className="mt-4 grid grid-cols-2 gap-3 min-[520px]:grid-cols-3 xl:grid-cols-3"
+          className="grid grid-cols-2 gap-3 p-4 sm:p-5"
           role="status"
           aria-label="Cargando balance de vacaciones"
         >
-          {[0, 1, 2, 3, 4].map((item) => (
+          {[0, 1, 2, 3].map((item) => (
             <div
               key={item}
               className="rounded-xl border border-lll-border bg-lll-bg p-3"
@@ -64,39 +86,41 @@ export default function VacationBalanceCard({
       ) : null}
 
       {error ? (
-        <div className="mt-3 rounded-xl border border-lll-border bg-lll-bg-softer p-3 text-sm text-red-200">
+        <div className="m-4 rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200 sm:m-5">
           {error}
         </div>
       ) : null}
 
       {!loading && summary ? (
-        <div className="lll-fade-in mt-4 grid grid-cols-2 min-[520px]:grid-cols-3 xl:grid-cols-3 gap-3">
-          <div className="min-w-0 rounded-xl border border-lll-border bg-lll-bg p-3">
-            <p className="truncate text-[10px] text-lll-text-soft">Acumuladas</p>
-            <p className="mt-2 text-[clamp(1.5rem,5vw,1.875rem)] font-semibold leading-tight">{fmt(summary.accrued)}</p>
+        <div className="lll-fade-in p-4 sm:p-5">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-2">
+            {[
+              ["Acumuladas", summary.accrued],
+              ["Usadas", summary.used],
+              ["Reservadas", summary.reserved],
+              ["Pendientes", summary.pending],
+            ].map(([label, value]) => (
+              <div key={label} className="min-w-0 rounded-xl border border-lll-border bg-lll-bg p-3">
+                <p className="truncate text-[10px] text-lll-text-soft">{label}</p>
+                <p className="mt-1 text-lg font-semibold leading-tight">{fmt(Number(value))}</p>
+              </div>
+            ))}
           </div>
 
-          <div className="min-w-0 rounded-xl border border-lll-border bg-lll-bg p-3">
-            <p className="truncate text-[10px] text-lll-text-soft">Usadas</p>
-            <p className="mt-2 text-[clamp(1.5rem,5vw,1.875rem)] font-semibold leading-tight">{fmt(summary.used)}</p>
-          </div>
-
-          <div className="min-w-0 rounded-xl border border-lll-border bg-lll-bg p-3">
-            <p className="truncate text-[10px] text-lll-text-soft">Reservadas</p>
-            <p className="mt-2 text-[clamp(1.5rem,5vw,1.875rem)] font-semibold leading-tight">{fmt(summary.reserved)}</p>
-          </div>
-
-          <div className="min-w-0 rounded-xl border border-lll-border bg-lll-bg p-3">
-            <p className="truncate text-[10px] text-lll-text-soft">Pendientes</p>
-            <p className="mt-2 text-[clamp(1.5rem,5vw,1.875rem)] font-semibold leading-tight">{fmt(summary.pending)}</p>
-          </div>
-
-          <div className="min-w-0 rounded-xl border border-lll-border bg-lll-bg p-3">
-            <p className="truncate text-[10px] text-lll-text-soft">Disponibles</p>
-            <p className="mt-2 text-[clamp(1.5rem,5vw,1.875rem)] font-semibold leading-tight">{fmt(summary.available)}</p>
+          <div className="mt-4">
+            <div className="mb-2 flex items-center justify-between gap-3 text-[10px] text-lll-text-soft">
+              <span>Saldo disponible</span>
+              <span>{Math.round(availablePercent)}% del acumulado</span>
+            </div>
+            <div className="h-1.5 overflow-hidden rounded-full bg-lll-bg">
+              <div
+                className="h-full rounded-full bg-cyan-400 transition-[width] duration-500"
+                style={{ width: `${availablePercent}%` }}
+              />
+            </div>
           </div>
         </div>
       ) : null}
-    </div>
+    </section>
   );
 }

@@ -6,6 +6,7 @@ import { getAbsenceTypeLabel } from "@/lib/absenceTypes";
 import { formatAR, toDate00 } from "@/lib/date";
 import { usePresence } from "@/components/ui/usePresence";
 import { AppIcon } from "@/components/ui/AppIcon";
+import { getAbsenceTimeRangeLabel } from "@/lib/absences/timeRange";
 
 type CalendarMode = "owner" | "user";
 
@@ -39,14 +40,22 @@ function dayKey(date: Date) {
   return `${y}-${m}-${d}`;
 }
 
-function dayBaseClass() {
-  // ✅ más aire + look más “app calendario”
+function dayBaseClass({
+  outside,
+  weekend,
+  today,
+}: {
+  outside: boolean;
+  weekend: boolean;
+  today: boolean;
+}) {
   return [
-    "relative rounded-2xl border transition",
-    "bg-lll-bg-soft border-lll-border",
-    "hover:bg-lll-bg-softer",
-    "p-2 sm:p-3 min-h-[92px] sm:min-h-[112px] lg:min-h-[118px] w-full",
-    "text-left",
+    "relative min-h-[76px] w-full rounded-xl border p-2 text-left transition sm:min-h-[82px] lg:min-h-[86px]",
+    "border-lll-border bg-lll-bg-soft hover:border-white/15 hover:bg-lll-bg-softer",
+    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lll-accent-alt/50",
+    outside ? "opacity-30" : "",
+    weekend && !outside ? "bg-white/[0.018]" : "",
+    today ? "ring-1 ring-lll-accent-alt/70" : "",
   ].join(" ");
 }
 
@@ -54,8 +63,9 @@ function dayToneClass(hits: Absence[]) {
   const hasPending = hits.some((h) => h.status === "pendiente");
   const hasApproved = hits.some((h) => h.status === "aprobado");
 
-  if (hasPending) return "ring-1 ring-lll-accent-alt/40";
-  if (hasApproved) return "ring-1 ring-lll-accent/30";
+  if (hasPending) return "border-amber-400/45 bg-amber-400/[0.045]";
+  if (hasApproved) return "border-emerald-400/35 bg-emerald-400/[0.035]";
+  if (hits.length > 0) return "border-red-400/30 bg-red-400/[0.025]";
   return "";
 }
 
@@ -113,15 +123,17 @@ export default function CalendarMonth({
 
   const daysGrid = useMemo(() => {
     const first = new Date(viewYear, viewMonth, 1);
-    const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
     const startOffset = mondayFirstIndex(first.getDay()); // 0..6
+    const gridStart = new Date(viewYear, viewMonth, 1 - startOffset);
 
-    const cells: Array<{ date: Date | null }> = [];
-    for (let i = 0; i < startOffset; i++) cells.push({ date: null });
-    for (let d = 1; d <= daysInMonth; d++)
-      cells.push({ date: new Date(viewYear, viewMonth, d) });
-    while (cells.length % 7 !== 0) cells.push({ date: null });
-    return cells;
+    return Array.from({ length: 42 }, (_, index) => {
+      const date = new Date(gridStart);
+      date.setDate(gridStart.getDate() + index);
+      return {
+        date,
+        outside: date.getMonth() !== viewMonth,
+      };
+    });
   }, [viewYear, viewMonth]);
 
   const absencesByDay = useMemo(() => {
@@ -190,9 +202,7 @@ export default function CalendarMonth({
         <div className="min-w-0">
           <p className="text-sm font-semibold">{title}</p>
           <p className="text-[12px] text-lll-text-soft">
-            {mode === "owner"
-              ? "Vista mensual del equipo. Click en un día para ver detalle."
-              : "Vista mensual (hover para ver detalle)."}
+            Seleccioná un día para ver el detalle.
           </p>
         </div>
 
@@ -230,11 +240,11 @@ export default function CalendarMonth({
         </div>
       </div>
 
-      <div className="mt-4 overflow-x-auto rounded-2xl border border-lll-border bg-lll-bg-softer p-3 sm:p-4">
-        <div className="min-w-[560px]">
-        <div className="grid grid-cols-7 gap-2 lg:gap-3 text-center text-[12px] text-lll-text-soft">
+      <div className="mt-3 overflow-x-auto rounded-2xl border border-lll-border bg-lll-bg-softer p-2 sm:p-3">
+        <div className="min-w-[600px]">
+        <div className="grid grid-cols-7 gap-1.5 text-center text-[11px] font-medium uppercase tracking-wide text-lll-text-soft/75">
           {["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"].map((d) => (
-            <div key={d} className="py-1">
+            <div key={d} className="py-1.5">
               {d}
             </div>
           ))}
@@ -242,103 +252,117 @@ export default function CalendarMonth({
 
         <div
           key={`${viewYear}-${viewMonth}`}
-          className="lll-fade-in mt-3 grid grid-cols-7 gap-2 lg:gap-3"
+          className="lll-fade-in mt-1.5 grid grid-cols-7 gap-1.5"
         >
-          {daysGrid.map((cell, idx) => {
-            if (!cell.date) {
-              return (
-                <div
-                  key={`empty-${idx}`}
-                  className="min-h-[92px] sm:min-h-[112px] lg:min-h-[118px] rounded-2xl border border-transparent"
-                />
-              );
-            }
-
+          {daysGrid.map((cell) => {
             const key = dayKey(cell.date);
             const hits = absencesByDay.get(key) ?? [];
+            const isWeekend = cell.date.getDay() === 0 || cell.date.getDay() === 6;
+            const isToday = key === dayKey(new Date());
 
             const total = hits.length;
             const pendingCount = hits.filter((h) => h.status === "pendiente").length;
             const approvedCount = hits.filter((h) => h.status === "aprobado").length;
+            const rejectedCount = hits.filter((h) => h.status === "rechazado").length;
 
-            // Tooltip: owner minimal
             const tooltip =
-              mode === "owner"
+              total === 0
                 ? cell.date.toLocaleDateString("es-AR")
-                : total === 0
-                  ? cell.date.toLocaleDateString("es-AR")
-                  : [
-                      cell.date.toLocaleDateString("es-AR"),
-                      "",
-                      ...hits.map((a) => {
-                        const who = a.userName ? `${a.userName} · ` : "";
-                        const typ = getAbsenceTypeLabel(
-                          a.type as Parameters<typeof getAbsenceTypeLabel>[0],
-                        );
-                        const range = `${formatAR(a.from)} → ${formatAR(a.to)}`;
-                        return `• ${who}${typ} (${a.status}) — ${range}`;
-                      }),
-                    ].join("\n");
+                : [
+                    cell.date.toLocaleDateString("es-AR"),
+                    "",
+                    ...hits.map((absence) => {
+                      const sensitive =
+                        absence.type === "enfermedad" ||
+                        absence.subtype === "TURNO_MEDICO";
+                      const typeLabel =
+                        mode === "owner" && sensitive
+                          ? "Ausencia"
+                          : getAbsenceTypeLabel(absence.type, absence.subtype ?? null);
+                      const who =
+                        mode === "owner" && absence.userName
+                          ? `${absence.userName} · `
+                          : "";
+                      return `• ${who}${typeLabel} (${absence.status})`;
+                    }),
+                  ].join("\n");
 
-            // ✅ resumen robusto para 1..N ausencias
-            const firstName = hits[0]?.userName ?? "—";
+            const firstHit = hits[0];
+            const firstLabel = firstHit
+              ? mode === "owner"
+                ? firstHit.userName || "Sin nombre"
+                : getAbsenceTypeLabel(firstHit.type, firstHit.subtype ?? null)
+              : "";
             const summaryLine =
-              total <= 1 ? firstName : `${firstName} +${total - 1}`;
+              total <= 1 ? firstLabel : `${firstLabel} +${total - 1}`;
 
             return (
               <button
                 key={cell.date.toISOString()}
                 type="button"
-                className={[dayBaseClass(), total ? dayToneClass(hits) : ""].join(" ")}
+                className={[
+                  dayBaseClass({
+                    outside: cell.outside,
+                    weekend: isWeekend,
+                    today: isToday,
+                  }),
+                  total ? dayToneClass(hits) : "",
+                ].join(" ")}
                 title={tooltip}
-                onClick={() => {
-                  if (mode === "owner") openDay(cell.date!);
-                }}
+                aria-label={`${cell.date.toLocaleDateString("es-AR")}: ${total} ausencia${total === 1 ? "" : "s"}`}
+                onClick={() => openDay(cell.date)}
               >
-                {/* day number */}
-                <div className="absolute top-2 right-2 sm:top-3 sm:right-3 text-[12px] text-lll-text-soft">
+                <div
+                  className={`absolute right-2 top-2 flex h-6 min-w-6 items-center justify-center rounded-full px-1 text-[11px] ${
+                    isToday
+                      ? "bg-lll-accent-alt text-black font-semibold"
+                      : "text-lll-text-soft"
+                  }`}
+                >
                   {cell.date.getDate()}
                 </div>
 
-                {/* badges */}
                 {total > 0 ? (
-                  <div className="absolute left-2 top-2 sm:left-3 sm:top-3 flex items-center gap-1.5">
-                    <span className="text-[11px] px-2 py-0.5 rounded-full border border-lll-border bg-lll-bg text-lll-text">
+                  <div className="absolute left-2 top-2 flex items-center gap-1.5">
+                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-lll-border bg-lll-bg px-1.5 text-[10px] font-medium text-lll-text">
                       {total}
                     </span>
                     {pendingCount > 0 ? (
-                      <span className="text-[11px] px-2 py-0.5 rounded-full border border-amber-700/30 bg-amber-900/20 text-amber-200">
-                        {pendingCount}P
-                      </span>
+                      <span
+                        className="h-1.5 w-1.5 rounded-full bg-amber-400"
+                        title={`${pendingCount} pendiente${pendingCount === 1 ? "" : "s"}`}
+                      />
                     ) : null}
                   </div>
                 ) : null}
 
-                {/* content */}
                 {total > 0 ? (
-                  <div className="mt-9 sm:mt-10 pr-2">
-                    <div className="text-[12px] font-medium text-lll-text truncate">
+                  <div className="mt-7 pr-1">
+                    <div className="truncate text-[11px] font-medium text-lll-text">
                       {summaryLine}
                     </div>
-                    <div className="mt-1 text-[11px] text-lll-text-soft/70">
-                      {total} out
+                    <div className="mt-0.5 text-[10px] text-lll-text-soft/70">
+                      {total} ausencia{total === 1 ? "" : "s"}
                     </div>
                   </div>
-                ) : (
-                  <div className="mt-9 sm:mt-10 text-[11px] text-lll-text-soft/40">—</div>
-                )}
+                ) : null}
 
-                {/* mini bar */}
                 {total > 0 ? (
-                  <div className="absolute left-2 right-2 sm:left-3 sm:right-3 bottom-2 h-1.5 rounded-full overflow-hidden border border-lll-border bg-lll-bg">
+                  <div className="absolute bottom-2 left-2 right-2 flex h-1 overflow-hidden rounded-full bg-lll-bg">
                     <div
-                      className="lll-progress-fill h-full bg-amber-500/70"
+                      className="lll-progress-fill h-full bg-amber-400/80"
                       style={{ width: `${Math.round((pendingCount / total) * 100)}%` }}
                     />
                     <div
-                      className="lll-progress-fill h-full bg-emerald-500/70"
+                      className="lll-progress-fill h-full bg-emerald-400/80"
                       style={{ width: `${Math.round((approvedCount / total) * 100)}%` }}
                     />
+                    {rejectedCount > 0 ? (
+                      <div
+                        className="lll-progress-fill h-full bg-red-400/70"
+                        style={{ width: `${Math.round((rejectedCount / total) * 100)}%` }}
+                      />
+                    ) : null}
                   </div>
                 ) : null}
               </button>
@@ -346,7 +370,7 @@ export default function CalendarMonth({
           })}
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-4 text-[12px] text-lll-text-soft">
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 border-t border-lll-border/70 pt-3 text-[11px] text-lll-text-soft">
           <div className="flex items-center gap-2">
             <span className="h-2 w-8 rounded-full overflow-hidden border border-lll-border bg-lll-bg">
               <span className="block h-full w-full bg-emerald-500/70" />
@@ -361,17 +385,20 @@ export default function CalendarMonth({
           </div>
           {mode !== "owner" ? (
             <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded bg-lll-bg-softer border border-lll-border opacity-80" />
+              <span className="h-2 w-8 overflow-hidden rounded-full border border-lll-border bg-red-400/70" />
               <span>Rechazado</span>
             </div>
           ) : null}
+          <div className="flex items-center gap-2">
+            <span className="h-5 w-5 rounded-full bg-lll-accent-alt" />
+            <span>Hoy</span>
+          </div>
         </div>
         </div>
       </div>
 
-      {/* Drawer owner */}
-{/* Modal detalle del día (owner) */}
-{mode === "owner" && drawerPresence.shouldRender ? (
+      {/* Detalle del día */}
+{drawerPresence.shouldRender ? (
   <div
     className="lll-presence-root fixed inset-0 z-50 flex items-center justify-center p-4"
     data-state={drawerPresence.state}
@@ -426,9 +453,13 @@ export default function CalendarMonth({
           <div className="max-h-[60vh] overflow-auto space-y-2 pr-1">
             {selectedHits.map((a) => {
               const rawLabel = getAbsenceTypeLabel(
-                a.type as Parameters<typeof getAbsenceTypeLabel>[0],
+                a.type,
+                a.subtype ?? null,
               );
-              const safeLabel = isSensitiveType(String(a.type)) ? "Ausencia" : rawLabel;
+              const sensitive =
+                isSensitiveType(String(a.type)) || a.subtype === "TURNO_MEDICO";
+              const safeLabel = mode === "owner" && sensitive ? "Ausencia" : rawLabel;
+              const timeRangeLabel = getAbsenceTimeRangeLabel(a);
 
               return (
                 <div
@@ -451,6 +482,12 @@ export default function CalendarMonth({
                   <div className="mt-2 text-[11px] text-lll-text-soft">
                     {formatAR(a.from)} → {formatAR(a.to)}
                   </div>
+                  {timeRangeLabel ? (
+                    <div className="mt-1 flex items-center gap-1.5 text-[11px] text-lll-text-soft">
+                      <AppIcon name="clock" className="h-3.5 w-3.5" />
+                      {timeRangeLabel}
+                    </div>
+                  ) : null}
                 </div>
               );
             })}
@@ -461,7 +498,9 @@ export default function CalendarMonth({
       {/* footer (opcional) */}
       <div className="flex items-center justify-between gap-2 p-4 border-t border-lll-border">
         <div className="text-[11px] text-lll-text-soft">
-          Tip: Click en otro día para cambiar.
+          {mode === "owner"
+            ? "Las solicitudes rechazadas no se muestran en este calendario."
+            : "Acá podés consultar el estado y horario de cada solicitud."}
         </div>
         {/* Si querés CTA real, lo conectamos después */}
         {/* <button className="rounded-xl bg-lll-accent px-3 py-2 text-xs text-black">Ver solicitudes</button> */}
