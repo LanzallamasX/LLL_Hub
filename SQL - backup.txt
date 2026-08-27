@@ -29,6 +29,12 @@ create table if not exists public.profiles (
   emergency_contact_name text,
   emergency_contact_phone text,
 
+  address text,
+  locality text,
+  province text,
+  postal_code text,
+  country text,
+
   role text not null default 'user' check (role in ('owner','user')),
   annual_vacation_days int not null default 10,
 
@@ -50,6 +56,11 @@ alter table public.profiles
   add column if not exists blood_type text,
   add column if not exists emergency_contact_name text,
   add column if not exists emergency_contact_phone text,
+  add column if not exists address text,
+  add column if not exists locality text,
+  add column if not exists province text,
+  add column if not exists postal_code text,
+  add column if not exists country text,
   add column if not exists role text,
   add column if not exists annual_vacation_days int not null default 10,
   add column if not exists active boolean not null default true,

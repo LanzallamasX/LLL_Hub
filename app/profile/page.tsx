@@ -227,6 +227,11 @@ export default function ProfilePage() {
         blood_type: profile.blood_type ?? null,
         emergency_contact_name: profile.emergency_contact_name ?? null,
         emergency_contact_phone: profile.emergency_contact_phone ?? null,
+        address: profile.address ?? null,
+        locality: profile.locality ?? null,
+        province: profile.province ?? null,
+        postal_code: profile.postal_code ?? null,
+        country: profile.country ?? null,
         team: profile.team ?? null,
         dni: profile.dni ?? null,
         job_title: profile.job_title ?? null,
@@ -423,6 +428,79 @@ export default function ProfilePage() {
                     })
                   }
                   placeholder="Ej: +54 11 5555-5555"
+                  className={inputClassName}
+                />
+              </Field>
+            </div>
+          </ProfileSection>
+
+          <ProfileSection
+            title="Domicilio"
+            description="Datos de residencia y ubicación."
+            className="xl:col-span-2"
+          >
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Field label="Dirección" className="sm:col-span-2">
+                <input
+                  value={profile.address ?? ""}
+                  onChange={(event) =>
+                    setProfile({ ...profile, address: event.target.value })
+                  }
+                  placeholder="Ej: Av. Corrientes 1234, 5° B"
+                  autoComplete="street-address"
+                  maxLength={200}
+                  className={inputClassName}
+                />
+              </Field>
+
+              <Field label="Localidad / ciudad">
+                <input
+                  value={profile.locality ?? ""}
+                  onChange={(event) =>
+                    setProfile({ ...profile, locality: event.target.value })
+                  }
+                  placeholder="Ej: Palermo"
+                  autoComplete="address-level2"
+                  maxLength={100}
+                  className={inputClassName}
+                />
+              </Field>
+
+              <Field label="Provincia">
+                <input
+                  value={profile.province ?? ""}
+                  onChange={(event) =>
+                    setProfile({ ...profile, province: event.target.value })
+                  }
+                  placeholder="Ej: Buenos Aires"
+                  autoComplete="address-level1"
+                  maxLength={100}
+                  className={inputClassName}
+                />
+              </Field>
+
+              <Field label="Código postal">
+                <input
+                  value={profile.postal_code ?? ""}
+                  onChange={(event) =>
+                    setProfile({ ...profile, postal_code: event.target.value })
+                  }
+                  placeholder="Ej: C1043AAZ"
+                  autoComplete="postal-code"
+                  maxLength={20}
+                  className={inputClassName}
+                />
+              </Field>
+
+              <Field label="País">
+                <input
+                  value={profile.country ?? ""}
+                  onChange={(event) =>
+                    setProfile({ ...profile, country: event.target.value })
+                  }
+                  placeholder="Ej: Argentina"
+                  autoComplete="country-name"
+                  maxLength={100}
                   className={inputClassName}
                 />
               </Field>

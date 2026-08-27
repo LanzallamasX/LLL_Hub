@@ -107,6 +107,13 @@ export type Profile = {
   emergency_contact_name: string | null;
   emergency_contact_phone: string | null;
 
+  // domicilio
+  address: string | null;
+  locality: string | null;
+  province: string | null;
+  postal_code: string | null;
+  country: string | null;
+
   // auth
   role: Role;
   annual_vacation_days: number;
@@ -133,6 +140,12 @@ export type UpdateMyProfileInput = {
   emergency_contact_name: string | null;
   emergency_contact_phone: string | null;
 
+  address: string | null;
+  locality: string | null;
+  province: string | null;
+  postal_code: string | null;
+  country: string | null;
+
   // RRHH (solo owner)
   dni: string | null;
   job_title: string | null;
@@ -143,7 +156,7 @@ const PROFILE_FOR_AUTH_SELECT =
   "role,full_name,first_name,last_name,start_date,annual_vacation_days";
 
 const PROFILE_FULL_SELECT =
-  "id,email,full_name,first_name,last_name,dni,team,job_title,birth_date,start_date,blood_type,emergency_contact_name,emergency_contact_phone,role,annual_vacation_days,active,created_at,updated_at";
+  "id,email,full_name,first_name,last_name,dni,team,job_title,birth_date,start_date,blood_type,emergency_contact_name,emergency_contact_phone,address,locality,province,postal_code,country,role,annual_vacation_days,active,created_at,updated_at";
 
 async function getAuthedUserId(): Promise<string | null> {
   const { data, error } = await supabase.auth.getUser();
@@ -252,6 +265,12 @@ export async function fetchMyProfileFull(): Promise<Profile | null> {
     emergency_contact_name: p.emergency_contact_name ?? null,
     emergency_contact_phone: p.emergency_contact_phone ?? null,
 
+    address: p.address ?? null,
+    locality: p.locality ?? null,
+    province: p.province ?? null,
+    postal_code: p.postal_code ?? null,
+    country: p.country ?? null,
+
     role: (p.role as Role) ?? "user",
 
     annual_vacation_days:
@@ -303,6 +322,12 @@ export async function updateMyProfile(
     blood_type: normStr(input.blood_type),
     emergency_contact_name: normStr(input.emergency_contact_name),
     emergency_contact_phone: normStr(input.emergency_contact_phone),
+
+    address: normStr(input.address),
+    locality: normStr(input.locality),
+    province: normStr(input.province),
+    postal_code: normStr(input.postal_code),
+    country: normStr(input.country),
   };
 
   if (isOwner) {
@@ -341,6 +366,12 @@ export async function updateMyProfile(
     blood_type: p.blood_type ?? null,
     emergency_contact_name: p.emergency_contact_name ?? null,
     emergency_contact_phone: p.emergency_contact_phone ?? null,
+
+    address: p.address ?? null,
+    locality: p.locality ?? null,
+    province: p.province ?? null,
+    postal_code: p.postal_code ?? null,
+    country: p.country ?? null,
 
     role: (p.role as Role) ?? "user",
 
