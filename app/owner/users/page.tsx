@@ -46,6 +46,10 @@ function isValidEmail(email: string) {
   return email.trim().includes("@");
 }
 
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
 function getRowName(row: {
   email: string;
   full_name: string | null;
@@ -80,10 +84,6 @@ function chipClass(kind: "pending" | "ok" | "warn") {
   if (kind === "ok")
     return "border-emerald-400/30 bg-emerald-400/10 text-emerald-200";
   return "border-amber-400/30 bg-amber-400/10 text-amber-200";
-}
-
-function pickDefined<T extends Record<string, any>>(obj: T) {
-  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined));
 }
 
 export default function OwnerUsersPage() {
@@ -146,8 +146,8 @@ export default function OwnerUsersPage() {
 
       setProfiles(profilesData);
       setAllowedUsers(allowedData);
-    } catch (e: any) {
-      setError(e?.message ?? "Error cargando usuarios.");
+    } catch (error: unknown) {
+      setError(errorMessage(error, "Error cargando usuarios."));
     } finally {
       setLoading(false);
       setAllowedLoading(false);
@@ -158,7 +158,6 @@ export default function OwnerUsersPage() {
     if (!isLoading && isAuthed && userId && role === "owner") {
       refresh();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, isAuthed, userId, role]);
 
   // ====== Unificar allowlist + profiles ======
@@ -172,8 +171,8 @@ export default function OwnerUsersPage() {
         key: `au:${au.id}`,
         email: au.email,
         full_name: au.full_name ?? null,
-        first_name: (au as any).first_name ?? null,
-        last_name: (au as any).last_name ?? null,
+        first_name: au.first_name ?? null,
+        last_name: au.last_name ?? null,
         allow: au,
         profile: null,
         status: "pendiente",
@@ -268,8 +267,8 @@ export default function OwnerUsersPage() {
       setPreAltaOpen(false);
 
       alert("Pre-alta creada. Quedará Pendiente hasta que la persona se registre.");
-    } catch (err: any) {
-      setError(err?.message ?? "Error agregando usuario.");
+    } catch (error: unknown) {
+      setError(errorMessage(error, "Error agregando usuario."));
     }
   }
 
@@ -279,8 +278,8 @@ export default function OwnerUsersPage() {
     try {
       const updated = await updateProfile(p.id, { active: !p.active });
       setProfiles((prev) => prev.map((x) => (x.id === p.id ? updated : x)));
-    } catch (err: any) {
-      setError(err?.message ?? "Error actualizando usuario.");
+    } catch (error: unknown) {
+      setError(errorMessage(error, "Error actualizando usuario."));
     }
   }
 
@@ -289,8 +288,8 @@ export default function OwnerUsersPage() {
     try {
       const updated = await updateProfile(p.id, { role: nextRole });
       setProfiles((prev) => prev.map((x) => (x.id === p.id ? updated : x)));
-    } catch (err: any) {
-      setError(err?.message ?? "Error actualizando rol.");
+    } catch (error: unknown) {
+      setError(errorMessage(error, "Error actualizando rol."));
     }
   }
 
@@ -305,77 +304,20 @@ export default function OwnerUsersPage() {
   }
 
 
-  
-async function saveEdit(id: string, payload: EditProfilePayload) {
-  setError(null);
+  async function saveEdit(id: string, payload: EditProfilePayload) {
+    setError(null);
 
-  try {
-    const start_date = (payload as any).startDate ?? (payload as any).start_date;
-
-    const patch = pickDefined({
-      first_name: (payload as any).firstName ?? (payload as any).first_name,
-      last_name: (payload as any).lastName ?? (payload as any).last_name,
-      full_name: (payload as any).fullName ?? (payload as any).full_name,
-
-      dni: (payload as any).dni,
-      job_title: (payload as any).jobTitle ?? (payload as any).job_title,
-      team: (payload as any).team,
-
-      start_date,
-
-      blood_type: (payload as any).bloodType ?? (payload as any).blood_type,
-      emergency_contact_name:
-        (payload as any).emergencyContactName ?? (payload as any).emergency_contact_name,
-      emergency_contact_phone:
-        (payload as any).emergencyContactPhone ?? (payload as any).emergency_contact_phone,
-
-      role: (payload as any).role,
-      active: (payload as any).active,
-
-      annual_vacation_days:
-        (payload as any).annualVacationDays ?? (payload as any).annual_vacation_days,
-      vacation_days_override: payload.vacation_days_override,
-
-      // ✅✅ NUEVO: migración vacaciones (ESTO FALTABA)
-      vacation_migration_date:
-        (payload as any).vacation_migration_date ?? (payload as any).vacationMigrationDate,
-      vacation_available_at_migration:
-        (payload as any).vacation_available_at_migration ?? (payload as any).vacationAvailableAtMigration,
-    });
-
-    // sanity anual days
-    if (patch.annual_vacation_days == null || !Number.isFinite(Number(patch.annual_vacation_days))) {
-      delete (patch as any).annual_vacation_days;
+    try {
+      const updated = await updateProfile(id, payload);
+      setProfiles((prev) =>
+        prev.map((profile) => (profile.id === id ? updated : profile))
+      );
+      setEditingProfile(updated);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Error guardando cambios.");
+      throw err;
     }
-
-    if ("vacation_days_override" in patch) {
-      const raw = patch.vacation_days_override;
-      patch.vacation_days_override = raw == null ? null : Number(raw);
-    }
-
-    // sanity migration number
-    if ("vacation_available_at_migration" in patch) {
-      const n = Number((patch as any).vacation_available_at_migration);
-      (patch as any).vacation_available_at_migration = Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0;
-    }
-
-    // "" -> null para date
-    if ("vacation_migration_date" in patch) {
-      const v = String((patch as any).vacation_migration_date ?? "").trim();
-      (patch as any).vacation_migration_date = v ? v : null;
-    }
-
-    const updated = await updateProfile(id, patch as any);
-
-    setProfiles((prev) => prev.map((x) => (x.id === id ? updated : x)));
-
-    // ✅ opcional pero recomendado: si el modal sigue abierto con "editingProfile" viejo, lo actualizás
-    setEditingProfile(updated);
-  } catch (err: any) {
-    setError(err?.message ?? "Error guardando cambios.");
-    throw err;
   }
-}
 
 
 
@@ -425,8 +367,8 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
       if (!res.ok) throw new Error(json?.error ?? "No se pudo eliminar el usuario.");
 
       await refresh();
-    } catch (e: any) {
-      setError(e?.message ?? "Error eliminando usuario.");
+    } catch (error: unknown) {
+      setError(errorMessage(error, "Error eliminando usuario."));
     }
   }
 
@@ -469,8 +411,8 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
       if (!res.ok) throw new Error(json?.error ?? "No se pudo archivar el usuario.");
 
       await refresh();
-    } catch (e: any) {
-      setError(e?.message ?? "Error archivando usuario.");
+    } catch (error: unknown) {
+      setError(errorMessage(error, "Error archivando usuario."));
     }
   }
 
@@ -502,8 +444,8 @@ async function saveEdit(id: string, payload: EditProfilePayload) {
       if (!res.ok) throw new Error(json?.error ?? "No se pudo enviar el acceso.");
 
       alert("Acceso enviado. Revisar inbox/spam.");
-    } catch (e: any) {
-      setError(e?.message ?? "Error enviando acceso.");
+    } catch (error: unknown) {
+      setError(errorMessage(error, "Error enviando acceso."));
     }
   }
 

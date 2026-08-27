@@ -8,6 +8,8 @@ export type AllowedUser = {
   id: number;
   email: string;
   full_name: string | null;
+  first_name: string | null;
+  last_name: string | null;
   role: AllowedUserRole;
   is_active: boolean;
 
@@ -31,7 +33,7 @@ export type CreateAllowedUserInput = {
 };
 
 const ALLOWED_USERS_SELECT =
-  "id,email,full_name,role,is_active,team,start_date,annual_vacation_days,created_at,created_by";
+  "id,email,full_name,first_name,last_name,role,is_active,team,start_date,annual_vacation_days,created_at,created_by";
 
 let cachedAllowedUsers: AllowedUser[] | null = null;
 let allowedUsersRequest: Promise<AllowedUser[]> | null = null;

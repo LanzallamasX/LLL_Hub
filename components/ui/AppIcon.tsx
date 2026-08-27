@@ -25,7 +25,9 @@ export type AppIconName =
   | "info"
   | "mail"
   | "clock"
-  | "bell";
+  | "bell"
+  | "download"
+  | "location";
 
 export function AppIcon({
   name,
@@ -187,6 +189,20 @@ export function AppIcon({
           <>
             <path d="M6 9a6 6 0 0 1 12 0c0 7 3 7 3 8H3c0-1 3-1 3-8Z" />
             <path d="M10 20h4" />
+          </>
+        );
+      case "download":
+        return (
+          <>
+            <path d="M12 3v12m0 0 4-4m-4 4-4-4" />
+            <path d="M5 19h14" />
+          </>
+        );
+      case "location":
+        return (
+          <>
+            <path d="M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Z" />
+            <circle cx="12" cy="10" r="2.5" />
           </>
         );
     }

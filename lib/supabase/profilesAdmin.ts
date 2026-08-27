@@ -18,6 +18,7 @@ export type ProfileRow = {
   active: boolean;
 
   team: string | null;
+  birth_date: string | null;
   start_date: string | null;
   annual_vacation_days: number;
   vacation_days_override: number | null;
@@ -25,6 +26,12 @@ export type ProfileRow = {
   blood_type: string | null;
   emergency_contact_name: string | null;
   emergency_contact_phone: string | null;
+
+  address: string | null;
+  locality: string | null;
+  province: string | null;
+  postal_code: string | null;
+  country: string | null;
 
   // ✅ migración vacaciones
   vacation_migration_date: string | null; // date (YYYY-MM-DD)
@@ -43,10 +50,16 @@ const PROFILES_SELECT_LEGACY = `
   dni,
   job_title,
   team,
+  birth_date,
   start_date,
   blood_type,
   emergency_contact_name,
   emergency_contact_phone,
+  address,
+  locality,
+  province,
+  postal_code,
+  country,
   role,
   active,
   annual_vacation_days,
@@ -124,10 +137,16 @@ export type UpdateProfilePatch = Partial<
     | "dni"
     | "job_title"
     | "team"
+    | "birth_date"
     | "start_date"
     | "blood_type"
     | "emergency_contact_name"
     | "emergency_contact_phone"
+    | "address"
+    | "locality"
+    | "province"
+    | "postal_code"
+    | "country"
     | "role"
     | "active"
     | "annual_vacation_days"
