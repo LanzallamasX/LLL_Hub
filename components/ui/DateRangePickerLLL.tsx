@@ -9,7 +9,8 @@ import { es } from "date-fns/locale";
 export type BlockedRange = {
   from: Date;
   to: Date;
-  status: "pendiente" | "aprobado";
+  status: "pendiente" | "aprobado" | "bloqueado";
+  label?: string;
 };
 
 type Props = {
@@ -114,6 +115,10 @@ export default function DateRangePickerLLL({
         blockedRanges.some(
           (range) => range.status === "aprobado" && inRange(date, range)
         ),
+      blocked: (date: Date) =>
+        blockedRanges.some(
+          (range) => range.status === "bloqueado" && inRange(date, range)
+        ),
     }),
     [holidaysISO, blockedRanges]
   );
@@ -137,6 +142,11 @@ export default function DateRangePickerLLL({
   );
   const hasBlockedSelected = selectedDaysForChecks.some((date) =>
     blockedRanges.some((range) => inRange(date, range))
+  );
+  const hasOrganizationBlockSelected = selectedDaysForChecks.some((date) =>
+    blockedRanges.some(
+      (range) => range.status === "bloqueado" && inRange(date, range)
+    )
   );
 
   function updateDiscreteDates(next: Date[] | undefined) {
@@ -221,6 +231,8 @@ export default function DateRangePickerLLL({
               "[&>button]:border-emerald-400/30 [&>button]:bg-emerald-400/[0.06]",
             pending:
               "[&>button]:border-amber-400/30 [&>button]:bg-amber-400/[0.06]",
+            blocked:
+              "[&>button]:border-rose-400/40 [&>button]:bg-rose-500/[0.12] [&>button]:text-rose-200",
           }}
           classNames={calendarClassNames}
           locale={es}
@@ -241,6 +253,8 @@ export default function DateRangePickerLLL({
               "[&>button]:border-emerald-400/30 [&>button]:bg-emerald-400/[0.06]",
             pending:
               "[&>button]:border-amber-400/30 [&>button]:bg-amber-400/[0.06]",
+            blocked:
+              "[&>button]:border-rose-400/40 [&>button]:bg-rose-500/[0.12] [&>button]:text-rose-200",
           }}
           classNames={calendarClassNames}
           locale={es}
@@ -262,6 +276,8 @@ export default function DateRangePickerLLL({
               "[&>button]:border-emerald-400/30 [&>button]:bg-emerald-400/[0.06]",
             pending:
               "[&>button]:border-amber-400/30 [&>button]:bg-amber-400/[0.06]",
+            blocked:
+              "[&>button]:border-rose-400/40 [&>button]:bg-rose-500/[0.12] [&>button]:text-rose-200",
           }}
           classNames={calendarClassNames}
           locale={es}
@@ -306,8 +322,14 @@ export default function DateRangePickerLLL({
             </span>
           ) : null}
           {hasBlockedSelected ? (
-            <span className="rounded-full border border-amber-400/25 bg-amber-400/[0.07] px-2.5 py-1 text-[10px] text-amber-200">
-              Se solapa con una solicitud
+            <span className={`rounded-full border px-2.5 py-1 text-[10px] ${
+              hasOrganizationBlockSelected
+                ? "border-rose-400/25 bg-rose-400/[0.07] text-rose-200"
+                : "border-amber-400/25 bg-amber-400/[0.07] text-amber-200"
+            }`}>
+              {hasOrganizationBlockSelected
+                ? "Incluye un período bloqueado"
+                : "Se solapa con una solicitud"}
             </span>
           ) : null}
         </div>
@@ -320,6 +342,9 @@ export default function DateRangePickerLLL({
           </span>
           <span className="inline-flex items-center gap-1.5">
             <span className="h-2 w-2 rounded-full bg-amber-400" /> Pendiente
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full bg-rose-400" /> Bloqueado
           </span>
           <span className="inline-flex items-center gap-1.5">
             <span className="h-2 w-2 rounded-full bg-sky-400" /> Feriado

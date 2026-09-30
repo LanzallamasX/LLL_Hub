@@ -34,7 +34,8 @@ type NavIconName =
   | "users"
   | "profile"
   | "settings"
-  | "policy";
+  | "policy"
+  | "blocked";
 
 function NavIcon({ name, tone }: { name: NavIconName; tone: string }) {
   const icon = (() => {
@@ -125,6 +126,14 @@ function NavIcon({ name, tone }: { name: NavIconName; tone: string }) {
             <path d="m9 14 2 2 4-4" />
           </>
         );
+      case "blocked":
+        return (
+          <>
+            <rect x="3.5" y="5" width="17" height="15" rx="2.5" />
+            <path d="M8 3v4M16 3v4M3.5 9h17" />
+            <path d="m9 13 6 6M15 13l-6 6" />
+          </>
+        );
     }
   })();
 
@@ -183,6 +192,7 @@ export default function UserLayout({
   const calendarHref = "/owner/calendar";
   const usersHref = "/owner/users";
   const ownerVacationPolicyHref = "/owner/vacation-policy";
+  const ownerBlockedPeriodsHref = "/owner/blocked-periods";
 
   const myAbsencesHref = "/absences";
   const profileHref = "/profile";
@@ -204,6 +214,8 @@ export default function UserLayout({
   const isUsersActive = effectiveMode === "owner" && pathname.startsWith("/owner/users");
   const isOwnerVacationPolicyActive =
     effectiveMode === "owner" && pathname.startsWith("/owner/vacation-policy");
+  const isOwnerBlockedPeriodsActive =
+    effectiveMode === "owner" && pathname.startsWith("/owner/blocked-periods");
 
   // ✅ ahora aplica para ambos roles (user + owner)
   const isMyAbsencesActive = pathname === "/absences" || pathname.startsWith("/absences");
@@ -312,13 +324,22 @@ export default function UserLayout({
             Configuración
           </Link>
           {effectiveMode === "owner" ? (
-            <Link
-              href={ownerVacationPolicyHref}
-              className={navLinkClass(isOwnerVacationPolicyActive)}
-            >
-              <NavIcon name="policy" tone="text-amber-400" />
-              Politica de vacaciones
-            </Link>
+            <>
+              <Link
+                href={ownerVacationPolicyHref}
+                className={navLinkClass(isOwnerVacationPolicyActive)}
+              >
+                <NavIcon name="policy" tone="text-amber-400" />
+                Politica de vacaciones
+              </Link>
+              <Link
+                href={ownerBlockedPeriodsHref}
+                className={navLinkClass(isOwnerBlockedPeriodsActive)}
+              >
+                <NavIcon name="blocked" tone="text-rose-400" />
+                Períodos bloqueados
+              </Link>
+            </>
           ) : null}
         </nav>
 
@@ -484,14 +505,24 @@ export default function UserLayout({
               </Link>
 
               {effectiveMode === "owner" ? (
-                <Link
-                  href={ownerVacationPolicyHref}
-                  onClick={() => setMobileOpen(false)}
-                  className={navLinkClass(isOwnerVacationPolicyActive)}
-                >
-                  <NavIcon name="policy" tone="text-amber-400" />
-                  Politica de vacaciones
-                </Link>
+                <>
+                  <Link
+                    href={ownerVacationPolicyHref}
+                    onClick={() => setMobileOpen(false)}
+                    className={navLinkClass(isOwnerVacationPolicyActive)}
+                  >
+                    <NavIcon name="policy" tone="text-amber-400" />
+                    Politica de vacaciones
+                  </Link>
+                  <Link
+                    href={ownerBlockedPeriodsHref}
+                    onClick={() => setMobileOpen(false)}
+                    className={navLinkClass(isOwnerBlockedPeriodsActive)}
+                  >
+                    <NavIcon name="blocked" tone="text-rose-400" />
+                    Períodos bloqueados
+                  </Link>
+                </>
               ) : null}
 
             </nav>

@@ -146,9 +146,11 @@ export type UpdateMyProfileInput = {
   postal_code: string | null;
   country: string | null;
 
-  // RRHH (solo owner)
+  // datos laborales editables por el usuario
   dni: string | null;
   job_title: string | null;
+
+  // RRHH (solo owner)
   start_date: string | null;
 };
 
@@ -291,8 +293,8 @@ export async function fetchMyProfileFull(): Promise<Profile | null> {
 
 /**
  * ✅ Update del perfil propio
- * - User: identidad + personal + emergencia
- * - Owner: además RRHH (dni, job_title, start_date)
+ * - User: identidad + personal + emergencia + dni + job_title
+ * - Owner: además start_date
  */
 export async function updateMyProfile(
   input: UpdateMyProfileInput
@@ -328,11 +330,12 @@ export async function updateMyProfile(
     province: normStr(input.province),
     postal_code: normStr(input.postal_code),
     country: normStr(input.country),
+
+    dni: normStr(input.dni),
+    job_title: normStr(input.job_title),
   };
 
   if (isOwner) {
-    payload.dni = normStr(input.dni);
-    payload.job_title = normStr(input.job_title);
     payload.start_date = input.start_date || null;
   }
 

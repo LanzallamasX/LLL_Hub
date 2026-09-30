@@ -27,6 +27,11 @@ import { useBodyScrollLock } from "@/components/ui/useBodyScrollLock";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { countChargeableDays } from "@/lib/vacations/dateCount";
 import { listActiveOwners, type OwnerOption } from "@/lib/supabase/owners";
+import {
+  blockedPeriodAppliesTo,
+  listActiveBlockedPeriods,
+  type AbsenceBlockedPeriod,
+} from "@/lib/supabase/blockedPeriods";
 
 export type NewAbsencePayload = {
   from: string;
@@ -244,6 +249,9 @@ export default function NewAbsenceModal({
   const [selectedOwnerIds, setSelectedOwnerIds] = useState<string[]>(initial?.notifyOwnerIds ?? []);
   const [ownersLoading, setOwnersLoading] = useState(false);
   const [ownersLoadError, setOwnersLoadError] = useState(false);
+  const [organizationBlockedPeriods, setOrganizationBlockedPeriods] = useState<
+    AbsenceBlockedPeriod[]
+  >([]);
   const modalPresence = usePresence(open);
   useBodyScrollLock(modalPresence.shouldRender);
 
@@ -286,7 +294,7 @@ export default function NewAbsenceModal({
     [selectedDates]
   );
 
-  const blockedRanges: BlockedRange[] = useMemo(() => {
+  const absenceBlockedRanges: BlockedRange[] = useMemo(() => {
     return (existingAbsences ?? [])
       .filter((a) => a.status === "pendiente" || a.status === "aprobado")
       .filter((a) => (ignoreAbsenceId ? a.id !== ignoreAbsenceId : true))
@@ -296,6 +304,30 @@ export default function NewAbsenceModal({
         status: a.status === "aprobado" ? "aprobado" : "pendiente",
       }));
   }, [existingAbsences, ignoreAbsenceId]);
+
+  const applicableBlockedPeriods = useMemo(
+    () =>
+      organizationBlockedPeriods.filter((period) =>
+        blockedPeriodAppliesTo(period, type)
+      ),
+    [organizationBlockedPeriods, type]
+  );
+
+  const policyBlockedRanges: BlockedRange[] = useMemo(
+    () =>
+      applicableBlockedPeriods.map((period) => ({
+          from: new Date(`${period.date_from}T00:00:00`),
+          to: new Date(`${period.date_to}T00:00:00`),
+          status: "bloqueado" as const,
+          label: period.reason,
+        })),
+    [applicableBlockedPeriods]
+  );
+
+  const blockedRanges: BlockedRange[] = useMemo(
+    () => [...absenceBlockedRanges, ...policyBlockedRanges],
+    [absenceBlockedRanges, policyBlockedRanges]
+  );
 
   const dateRangeOk = useMemo(() => {
     if (usesIndividualDates) return selectedDates.length > 0;
@@ -347,6 +379,40 @@ export default function NewAbsenceModal({
     const subject = usesIndividualDates ? "Una fecha seleccionada" : "Ese rango";
     return `${subject} se solapa con una ausencia ${estado} (${overlapAbsence.from} → ${overlapAbsence.to}). Elegí otras fechas.`;
   }, [overlapAbsence, usesIndividualDates]);
+
+  const blockedPeriodOverlap = useMemo(() => {
+    if (applicableBlockedPeriods.length === 0) return null;
+
+    if (usesIndividualDates) {
+      return (
+        applicableBlockedPeriods.find((period) =>
+          selectedDates.some(
+            (date) => date >= period.date_from && date <= period.date_to
+          )
+        ) ?? null
+      );
+    }
+
+    if (!from) return null;
+    const rangeTo = isHourUnit ? from : to;
+    if (!rangeTo || rangeTo < from) return null;
+    return (
+      applicableBlockedPeriods.find(
+        (period) => from <= period.date_to && rangeTo >= period.date_from
+      ) ?? null
+    );
+  }, [
+    applicableBlockedPeriods,
+    usesIndividualDates,
+    selectedDates,
+    from,
+    to,
+    isHourUnit,
+  ]);
+
+  const blockedPeriodErrorMsg = blockedPeriodOverlap
+    ? `Esas fechas no están disponibles (${blockedPeriodOverlap.date_from} → ${blockedPeriodOverlap.date_to}): ${blockedPeriodOverlap.reason}.`
+    : "";
 
   const usage = useMemo(() => {
     if (!policy?.deducts || !policy.deductsFrom) return null;
@@ -455,6 +521,7 @@ export default function NewAbsenceModal({
     if (isSubmitting) return false;
     if (!dateRangeOk) return false;
     if (overlapAbsence) return false;
+    if (blockedPeriodOverlap) return false;
     if (isVacation && exceedsAvailable) return false;
     if (!licenseSubtypeOk) return false;
     if (!hoursOk) return false;
@@ -465,6 +532,7 @@ export default function NewAbsenceModal({
     isSubmitting,
     dateRangeOk,
     overlapAbsence,
+    blockedPeriodOverlap,
     isVacation,
     exceedsAvailable,
     licenseSubtypeOk,
@@ -538,6 +606,24 @@ export default function NewAbsenceModal({
       alive = false;
     };
   }, [open, showNotificationSelector]);
+
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+
+    listActiveBlockedPeriods()
+      .then((periods) => {
+        if (alive) setOrganizationBlockedPeriods(periods);
+      })
+      .catch((loadError) => {
+        console.warn("listActiveBlockedPeriods warning", loadError);
+        if (alive) setOrganizationBlockedPeriods([]);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -628,7 +714,12 @@ export default function NewAbsenceModal({
 
             <div className="mt-3 space-y-2">
               {submitError ? <Pill tone="danger">{submitError}</Pill> : null}
-              {!submitError && overlapErrorMsg ? <Pill tone="warn">{overlapErrorMsg}</Pill> : null}
+              {!submitError && blockedPeriodErrorMsg ? (
+                <Pill tone="danger">{blockedPeriodErrorMsg}</Pill>
+              ) : null}
+              {!submitError && !blockedPeriodErrorMsg && overlapErrorMsg ? (
+                <Pill tone="warn">{overlapErrorMsg}</Pill>
+              ) : null}
             </div>
 
             {/* ✅ indicator opcional de simulación */}
@@ -817,6 +908,21 @@ export default function NewAbsenceModal({
                       ? "Días seleccionados"
                       : "Rango de fechas"}
                 </div>
+                {applicableBlockedPeriods.length > 0 ? (
+                  <div className="mb-3 rounded-xl border border-rose-400/25 bg-rose-500/[0.07] px-3 py-2 text-[11px] leading-5 text-rose-100">
+                    <p className="font-semibold">Fechas no disponibles</p>
+                    {applicableBlockedPeriods.slice(0, 3).map((period) => (
+                      <p key={period.id} className="text-rose-100/80">
+                        {period.date_from} → {period.date_to} · {period.reason}
+                      </p>
+                    ))}
+                    {applicableBlockedPeriods.length > 3 ? (
+                      <p className="text-rose-100/70">
+                        +{applicableBlockedPeriods.length - 3} períodos más
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
                 {isHourUnit ? (
                   <div className="space-y-3">
                     <DateRangePickerLLL

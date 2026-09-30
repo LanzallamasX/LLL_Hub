@@ -512,13 +512,13 @@ export default function ProfilePage() {
             description={
               isOwner
                 ? "Información interna del colaborador."
-                : "Esta información la administra RRHH."
+                : "Actualizá tu puesto de trabajo y DNI."
             }
             className="xl:col-span-2"
           >
             {!isOwner ? (
               <div className="mb-3 rounded-lg border border-lll-border bg-lll-bg-softer px-3 py-2 text-[12px] text-lll-text-soft">
-                Si necesitás modificar estos datos, contactá a un Owner.
+                La fecha de ingreso la administra un Owner.
               </div>
             ) : null}
 
@@ -526,28 +526,22 @@ export default function ProfilePage() {
               <Field label="Puesto de trabajo">
                 <input
                   value={profile.job_title ?? ""}
-                  disabled={!isOwner}
                   onChange={(event) =>
                     setProfile({ ...profile, job_title: event.target.value })
                   }
                   placeholder="Ej: Frontend Developer"
-                  className={
-                    isOwner ? inputClassName : lockedInputClassName
-                  }
+                  className={inputClassName}
                 />
               </Field>
 
               <Field label="DNI">
                 <input
                   value={profile.dni ?? ""}
-                  disabled={!isOwner}
                   onChange={(event) =>
                     setProfile({ ...profile, dni: event.target.value })
                   }
                   placeholder="Ej: 12345678"
-                  className={
-                    isOwner ? inputClassName : lockedInputClassName
-                  }
+                  className={inputClassName}
                 />
               </Field>
 
