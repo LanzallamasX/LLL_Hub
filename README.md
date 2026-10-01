@@ -44,6 +44,9 @@ También se puede simular una fecha manualmente entrando como owner a
 parámetro y el servidor permite enviar las plantillas exclusivamente al email
 de la sesión del owner.
 
+La referencia completa de parámetros de prueba está en
+[`docs/PARAMETROS_URL_DE_PRUEBA.md`](docs/PARAMETROS_URL_DE_PRUEBA.md).
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
