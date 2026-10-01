@@ -39,13 +39,21 @@ export default function AbsenceList({
   absences,
   onEdit,
   focusId = null,
+  layout = "list",
+  collapsible = false,
+  defaultOpen = true,
 }: {
   absences: Absence[];
   onEdit: (absence: Absence) => void;
   focusId?: string | null;
+  layout?: "list" | "grid";
+  collapsible?: boolean;
+  defaultOpen?: boolean;
 }) {
   const { deleteAbsence } = useAbsences();
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [open, setOpen] = useState(defaultOpen);
+  const expanded = !collapsible || open || Boolean(focusId);
 
   useEffect(() => {
     if (!focusId || absences.length === 0) return;
@@ -79,19 +87,49 @@ async function onDelete(a: Absence) {
 
   return (
     <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-lll-border bg-lll-bg-softer text-lll-accent-alt">
             <AppIcon name="absence" className="h-4 w-4" />
           </div>
           <p className="text-sm font-semibold">Mis solicitudes</p>
         </div>
-        <span className="text-[12px] text-lll-text-soft">{absences.length}</span>
+        <div className="flex items-center gap-2">
+          <span className="rounded-full border border-lll-border bg-lll-bg-softer px-2.5 py-1 text-[11px] text-lll-text-soft">
+            {absences.length}
+          </span>
+          {collapsible ? (
+            <button
+              type="button"
+              onClick={() => setOpen((current) => !current)}
+              disabled={Boolean(focusId)}
+              aria-expanded={expanded}
+              className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-lll-border bg-lll-bg-softer px-3 py-2 text-[11px] font-medium text-lll-text-soft transition hover:text-lll-text disabled:cursor-default disabled:opacity-60"
+            >
+              {expanded ? "Ocultar" : "Ver solicitudes"}
+              <AppIcon
+                name="arrowRight"
+                className={`h-3.5 w-3.5 transition-transform ${
+                  expanded ? "-rotate-90" : "rotate-90"
+                }`}
+              />
+            </button>
+          ) : null}
+        </div>
       </div>
 
-      <div className="mt-3 space-y-3">
+      {expanded ? (
+        <div
+          className={
+            layout === "grid"
+              ? "lll-fade-in mt-3 grid grid-cols-1 gap-3 xl:grid-cols-2"
+              : "lll-fade-in mt-3 space-y-3"
+          }
+        >
         {absences.length === 0 ? (
-          <div className="rounded-xl border border-lll-border bg-lll-bg-softer">
+          <div className={`rounded-xl border border-lll-border bg-lll-bg-softer ${
+            layout === "grid" ? "xl:col-span-2" : ""
+          }`}>
             <EmptyState
               icon={<AppIcon name="calendar" className="h-5 w-5" />}
               title="No hay solicitudes para mostrar"
@@ -207,7 +245,12 @@ async function onDelete(a: Absence) {
             </div>
           );
         })}
-      </div>
+        </div>
+      ) : (
+        <p className="mt-2 text-[11px] text-lll-text-soft">
+          Abrí esta sección cuando quieras revisar, editar o conversar sobre una solicitud.
+        </p>
+      )}
     </div>
   );
 }

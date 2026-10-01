@@ -1,7 +1,15 @@
+import { supabase } from "@/lib/supabase/client";
+
 export async function processPendingEmails(reason: string) {
   try {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) throw error;
+    const token = data.session?.access_token;
+    if (!token) throw new Error("No active session");
+
     const res = await fetch("/api/process-emails", {
-      method: "GET",
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
       cache: "no-store",
     });
 

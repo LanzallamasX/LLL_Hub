@@ -15,7 +15,10 @@ function notifIcon(type: string) {
   const t = (type ?? "").toLowerCase();
   let name: AppIconName = "bell";
   let tone = "text-lll-accent-alt";
-  if (t.includes("approved")) {
+  if (t.includes("birthday")) {
+    name = "calendar";
+    tone = "text-fuchsia-300";
+  } else if (t.includes("approved")) {
     name = "check";
     tone = "text-emerald-300";
   } else if (t.includes("rejected")) {

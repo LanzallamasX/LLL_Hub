@@ -52,8 +52,15 @@ export default function NotificationsPage() {
               <div className="lll-fade-in divide-y divide-lll-border">
                 {items.map((item) => (
                   <div key={item.notificationId} className="flex items-start gap-3 p-4">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-lll-border bg-lll-bg text-lll-accent-alt">
-                      <AppIcon name="bell" className="h-4 w-4" />
+                    <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-lll-border bg-lll-bg ${
+                      item.notification.type.includes("birthday")
+                        ? "text-fuchsia-300"
+                        : "text-lll-accent-alt"
+                    }`}>
+                      <AppIcon
+                        name={item.notification.type.includes("birthday") ? "calendar" : "bell"}
+                        className="h-4 w-4"
+                      />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start justify-between gap-3">

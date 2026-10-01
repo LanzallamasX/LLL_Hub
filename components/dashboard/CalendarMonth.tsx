@@ -10,8 +10,15 @@ import { getAbsenceTimeRangeLabel } from "@/lib/absences/timeRange";
 
 type CalendarMode = "owner" | "user";
 
+export type BirthdayCalendarItem = {
+  id: string;
+  name: string;
+  birthDate: string;
+};
+
 type Props = {
   absences: Absence[];
+  birthdays?: BirthdayCalendarItem[];
   viewYear: number;
   viewMonth: number; // 0..11
   onPrevMonth: () => void;
@@ -109,6 +116,7 @@ function isSensitiveType(type: string) {
 
 export default function CalendarMonth({
   absences,
+  birthdays = [],
   viewYear,
   viewMonth,
   onPrevMonth,
@@ -177,6 +185,30 @@ export default function CalendarMonth({
     return map;
   }, [absences, mode]);
 
+  const birthdaysByDay = useMemo(() => {
+    const byMonthDay = new Map<string, BirthdayCalendarItem[]>();
+    for (const birthday of birthdays) {
+      const monthDay = birthday.birthDate.slice(5, 10);
+      if (!/^\d{2}-\d{2}$/.test(monthDay)) continue;
+      const current = byMonthDay.get(monthDay) ?? [];
+      current.push(birthday);
+      byMonthDay.set(monthDay, current);
+    }
+
+    const byDay = new Map<string, BirthdayCalendarItem[]>();
+    for (const cell of daysGrid) {
+      const key = dayKey(cell.date);
+      const matches = byMonthDay.get(key.slice(5, 10));
+      if (matches?.length) {
+        byDay.set(
+          key,
+          [...matches].sort((left, right) => left.name.localeCompare(right.name))
+        );
+      }
+    }
+    return byDay;
+  }, [birthdays, daysGrid]);
+
   const selectedKey = useMemo(() => {
     if (!selectedDate) return null;
     return dayKey(selectedDate);
@@ -186,6 +218,11 @@ export default function CalendarMonth({
     if (!selectedKey) return [];
     return absencesByDay.get(selectedKey) ?? [];
   }, [absencesByDay, selectedKey]);
+
+  const selectedBirthdays = useMemo(() => {
+    if (!selectedKey) return [];
+    return birthdaysByDay.get(selectedKey) ?? [];
+  }, [birthdaysByDay, selectedKey]);
 
   function openDay(date: Date) {
     setSelectedDate(date);
@@ -257,6 +294,7 @@ export default function CalendarMonth({
           {daysGrid.map((cell) => {
             const key = dayKey(cell.date);
             const hits = absencesByDay.get(key) ?? [];
+            const birthdayHits = birthdaysByDay.get(key) ?? [];
             const isWeekend = cell.date.getDay() === 0 || cell.date.getDay() === 6;
             const isToday = key === dayKey(new Date());
 
@@ -266,11 +304,12 @@ export default function CalendarMonth({
             const rejectedCount = hits.filter((h) => h.status === "rechazado").length;
 
             const tooltip =
-              total === 0
+              total === 0 && birthdayHits.length === 0
                 ? cell.date.toLocaleDateString("es-AR")
                 : [
                     cell.date.toLocaleDateString("es-AR"),
                     "",
+                    ...birthdayHits.map((birthday) => `🎂 Cumpleaños de ${birthday.name}`),
                     ...hits.map((absence) => {
                       const sensitive =
                         absence.type === "enfermedad" ||
@@ -307,9 +346,12 @@ export default function CalendarMonth({
                     today: isToday,
                   }),
                   total ? dayToneClass(hits) : "",
+                  birthdayHits.length > 0
+                    ? "border-fuchsia-400/45 bg-fuchsia-500/[0.055]"
+                    : "",
                 ].join(" ")}
                 title={tooltip}
-                aria-label={`${cell.date.toLocaleDateString("es-AR")}: ${total} ausencia${total === 1 ? "" : "s"}`}
+                aria-label={`${cell.date.toLocaleDateString("es-AR")}: ${total} ausencia${total === 1 ? "" : "s"}, ${birthdayHits.length} cumpleaños`}
                 onClick={() => openDay(cell.date)}
               >
                 <div
@@ -322,11 +364,21 @@ export default function CalendarMonth({
                   {cell.date.getDate()}
                 </div>
 
-                {total > 0 ? (
+                {total > 0 || birthdayHits.length > 0 ? (
                   <div className="absolute left-2 top-2 flex items-center gap-1.5">
-                    <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-lll-border bg-lll-bg px-1.5 text-[10px] font-medium text-lll-text">
-                      {total}
-                    </span>
+                    {total > 0 ? (
+                      <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-lll-border bg-lll-bg px-1.5 text-[10px] font-medium text-lll-text">
+                        {total}
+                      </span>
+                    ) : null}
+                    {birthdayHits.length > 0 ? (
+                      <span
+                        className="inline-flex h-5 min-w-5 items-center justify-center rounded-full border border-fuchsia-400/35 bg-fuchsia-500/15 px-1 text-[10px]"
+                        title={`${birthdayHits.length} cumpleaños`}
+                      >
+                        🎂
+                      </span>
+                    ) : null}
                     {pendingCount > 0 ? (
                       <span
                         className="h-1.5 w-1.5 rounded-full bg-amber-400"
@@ -336,14 +388,22 @@ export default function CalendarMonth({
                   </div>
                 ) : null}
 
-                {total > 0 ? (
+                {total > 0 || birthdayHits.length > 0 ? (
                   <div className="mt-7 pr-1">
-                    <div className="truncate text-[11px] font-medium text-lll-text">
-                      {summaryLine}
-                    </div>
-                    <div className="mt-0.5 text-[10px] text-lll-text-soft/70">
-                      {total} ausencia{total === 1 ? "" : "s"}
-                    </div>
+                    {birthdayHits.length > 0 ? (
+                      <div className="truncate text-[11px] font-medium text-fuchsia-200">
+                        🎂 {birthdayHits.map((birthday) => birthday.name).join(", ")}
+                      </div>
+                    ) : (
+                      <div className="truncate text-[11px] font-medium text-lll-text">
+                        {summaryLine}
+                      </div>
+                    )}
+                    {total > 0 ? (
+                      <div className="mt-0.5 text-[10px] text-lll-text-soft/70">
+                        {total} ausencia{total === 1 ? "" : "s"}
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
 
@@ -393,6 +453,14 @@ export default function CalendarMonth({
             <span className="h-5 w-5 rounded-full bg-lll-accent-alt" />
             <span>Hoy</span>
           </div>
+          {birthdays.length > 0 ? (
+            <div className="flex items-center gap-2">
+              <span className="flex h-5 w-5 items-center justify-center rounded-full border border-fuchsia-400/35 bg-fuchsia-500/15 text-[10px]">
+                🎂
+              </span>
+              <span>Cumpleaños</span>
+            </div>
+          ) : null}
         </div>
         </div>
       </div>
@@ -431,6 +499,9 @@ export default function CalendarMonth({
           </div>
           <div className="text-xs text-lll-text-soft">
             {selectedHits.length} ausencia{selectedHits.length === 1 ? "" : "s"}
+            {selectedBirthdays.length > 0
+              ? ` · ${selectedBirthdays.length} cumpleaños`
+              : ""}
           </div>
         </div>
 
@@ -445,12 +516,28 @@ export default function CalendarMonth({
 
       {/* body */}
       <div className="p-4">
-        {selectedHits.length === 0 ? (
+        {selectedHits.length === 0 && selectedBirthdays.length === 0 ? (
           <div className="rounded-2xl border border-lll-border bg-lll-bg-soft p-4 text-sm text-lll-text-soft">
-            No hay ausencias para este día.
+            No hay ausencias ni cumpleaños para este día.
           </div>
         ) : (
           <div className="max-h-[60vh] overflow-auto space-y-2 pr-1">
+            {selectedBirthdays.map((birthday) => (
+              <div
+                key={`birthday-${birthday.id}`}
+                className="rounded-2xl border border-fuchsia-400/25 bg-fuchsia-500/[0.07] p-3"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-fuchsia-400/30 bg-fuchsia-500/10 text-lg">
+                    🎂
+                  </span>
+                  <div>
+                    <p className="text-sm font-semibold text-lll-text">{birthday.name}</p>
+                    <p className="mt-0.5 text-xs text-fuchsia-200">Cumpleaños</p>
+                  </div>
+                </div>
+              </div>
+            ))}
             {selectedHits.map((a) => {
               const rawLabel = getAbsenceTypeLabel(
                 a.type,

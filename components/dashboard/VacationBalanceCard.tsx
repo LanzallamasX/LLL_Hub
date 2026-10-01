@@ -14,10 +14,12 @@ export default function VacationBalanceCard({
   data,
   loading = false,
   error = null,
+  className = "",
 }: {
   data: VacationBalance | null;
   loading?: boolean;
   error?: string | null;
+  className?: string;
 }) {
 
   const summary = useMemo(() => {
@@ -39,7 +41,7 @@ export default function VacationBalanceCard({
     : 0;
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-lll-border bg-lll-bg-soft">
+    <section className={`overflow-hidden rounded-2xl border border-lll-border bg-lll-bg-soft ${className}`}>
       <div className="border-b border-lll-border bg-gradient-to-br from-cyan-400/[0.08] via-transparent to-transparent p-4 sm:p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 items-start gap-3">

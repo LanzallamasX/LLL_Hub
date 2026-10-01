@@ -5,20 +5,23 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import UserLayout from "@/components/layout/UserLayout";
 import NewAbsenceModal, { type NewAbsencePayload } from "@/components/modals/NewAbsenceModal";
-import CalendarMonth from "@/components/dashboard/CalendarMonth";
+import CalendarMonth, {
+  type BirthdayCalendarItem,
+} from "@/components/dashboard/CalendarMonth";
 import AbsenceList from "@/components/dashboard/AbsenceList";
 import VacationBalanceCard from "@/components/dashboard/VacationBalanceCard";
+import {
+  NextAbsenceCard,
+  UserDashboardSidebar,
+} from "@/components/dashboard/UserDashboardOverview";
 import { AppIcon } from "@/components/ui/AppIcon";
 import { PageSummary, SummaryChip, SummaryIcon } from "@/components/ui/PageSummary";
-import { SectionCard } from "@/components/ui/SectionCard";
 import { Skeleton } from "@/components/ui/Skeleton";
 
 import { useAbsences } from "@/contexts/AbsencesContext";
 import { useAuth } from "@/contexts/AuthContext";
 
-import { getAbsenceTypeLabel } from "@/lib/absenceTypes";
-import { getAbsenceTimeRangeLabel } from "@/lib/absences/timeRange";
-import { toDate00, formatAR, startOfTodayMs } from "@/lib/date";
+import { toDate00, startOfTodayMs } from "@/lib/date";
 import type { Absence } from "@/lib/supabase/absences";
 
 import { computeUsageByBalanceKey } from "@/lib/balances/usage";
@@ -36,6 +39,22 @@ import {
   type VacationPolicyMode,
 } from "@/lib/supabase/vacationPolicy";
 import { processPendingEmails } from "@/lib/email/processPendingEmails";
+import { listTeamBirthdays } from "@/lib/supabase/birthdays";
+
+function nextBirthdayDate(birthDate: string, from: Date) {
+  const [, monthText, dayText] = birthDate.split("-");
+  const month = Number(monthText);
+  const day = Number(dayText);
+  if (!month || !day) return null;
+
+  const start = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  for (let year = start.getFullYear(); year <= start.getFullYear() + 4; year += 1) {
+    const candidate = new Date(year, month - 1, day);
+    if (candidate.getMonth() !== month - 1 || candidate.getDate() !== day) continue;
+    if (candidate >= start) return candidate;
+  }
+  return null;
+}
 
 function DashboardContentSkeleton() {
   return (
@@ -115,6 +134,8 @@ function DashboardPageContent() {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editing, setEditing] = useState<Absence | null>(null);
+  const [teamBirthdays, setTeamBirthdays] = useState<BirthdayCalendarItem[]>([]);
+  const [birthdaysError, setBirthdaysError] = useState<string | null>(null);
 
   const year = new Date().getFullYear();
 const { isoSet: holidaysISO } = useHolidays(year);
@@ -215,6 +236,30 @@ const { isoSet: holidaysISO } = useHolidays(year);
     void loadMyAbsences(userId);
   }, [isLoading, isAuthed, userId, router, loadMyAbsences]);
 
+  useEffect(() => {
+    if (!isAuthed || !userId) return;
+    let alive = true;
+
+    listTeamBirthdays()
+      .then((birthdays) => {
+        if (alive) setTeamBirthdays(birthdays);
+      })
+      .catch((birthdayError: unknown) => {
+        if (!alive) return;
+        const message =
+          birthdayError &&
+          typeof birthdayError === "object" &&
+          "message" in birthdayError
+            ? String(birthdayError.message)
+            : "No se pudieron cargar los cumpleaños del equipo.";
+        setBirthdaysError(message);
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [isAuthed, userId]);
+
   const currentUser = useMemo(
     () => ({
       userId: userId ?? "",
@@ -242,6 +287,23 @@ const { isoSet: holidaysISO } = useHolidays(year);
 
     return upcoming[0]?.a ?? null;
   }, [myAbsences]);
+
+  const upcomingBirthdays = useMemo(() => {
+    const today = new Date();
+    const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const horizon = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 45);
+
+    return teamBirthdays
+      .map((birthday) => ({
+        ...birthday,
+        nextDate: nextBirthdayDate(birthday.birthDate, start),
+      }))
+      .filter(
+        (birthday): birthday is BirthdayCalendarItem & { nextDate: Date } =>
+          birthday.nextDate !== null && birthday.nextDate <= horizon
+      )
+      .sort((left, right) => left.nextDate.getTime() - right.nextDate.getTime());
+  }, [teamBirthdays]);
 
   const usageByKey = useMemo(() => {
     const y = new Date().getFullYear();
@@ -292,11 +354,6 @@ const [startDateISO, setStartDateISO] = useState<string | null>(null);
     : false;
 
   const vacationAvailable = Number(vacDb?.available ?? 0);
-  const nextAbsenceTimeRange = nextAbsence
-    ? getAbsenceTimeRangeLabel(nextAbsence)
-    : null;
-
-
   // Gates
   if (isLoading) {
     return (
@@ -450,113 +507,57 @@ const [startDateISO, setStartDateISO] = useState<string | null>(null);
             {absError}
           </div>
         ) : null}
+        {birthdaysError ? (
+          <div
+            role="alert"
+            className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200"
+          >
+            {birthdaysError}
+          </div>
+        ) : null}
 
         {!dashboardContentReady ? (
           <DashboardContentSkeleton />
         ) : (
-          <div className="lll-fade-in grid grid-cols-1 gap-4 xl:grid-cols-12 xl:items-start">
-            <div className="space-y-4 xl:col-span-4">
-              <div className="grid grid-cols-2 gap-3">
-                <article className="min-h-32 rounded-2xl border border-amber-400/20 bg-gradient-to-br from-amber-400/[0.09] via-lll-bg-soft to-lll-bg-soft p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-amber-200/80">
-                      Pendientes
-                    </p>
-                    <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-amber-300/20 bg-amber-300/10 text-amber-200">
-                      <AppIcon name="clock" className="h-4 w-4" />
-                    </div>
-                  </div>
-                  <p className="mt-3 text-3xl font-semibold leading-none">{myPendingCount}</p>
-                  <p className="mt-2 text-[11px] leading-4 text-lll-text-soft">
-                    {myPendingCount === 0 ? "No tenés aprobaciones en espera." : "A la espera de aprobación."}
-                  </p>
-                </article>
-
-                <article className="min-h-32 rounded-2xl border border-cyan-400/20 bg-gradient-to-br from-cyan-400/[0.09] via-lll-bg-soft to-lll-bg-soft p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-cyan-200/80">
-                      Disponibles
-                    </p>
-                    <div className="flex h-9 w-9 items-center justify-center rounded-xl border border-cyan-300/20 bg-cyan-300/10 text-cyan-200">
-                      <AppIcon name="balance" className="h-4 w-4" />
-                    </div>
-                  </div>
-                  <p className="mt-3 text-3xl font-semibold leading-none">
-                    {vacDb ? vacationAvailable : "—"}
-                    {vacDb ? <span className="ml-1 text-xs font-medium text-lll-text-soft">días</span> : null}
-                  </p>
-                  <p className="mt-2 text-[11px] leading-4 text-lll-text-soft">Saldo actual de vacaciones.</p>
-                </article>
-              </div>
-
-
-              <AbsenceList absences={myAbsences} onEdit={openEdit} focusId={focusId} />
-              <VacationBalanceCard data={vacDb} loading={vacDbLoading} error={vacDbError} />
-
-              
-              <SectionCard
-                title="Próxima ausencia"
-                description="Tu siguiente solicitud aprobada o pendiente."
-                icon={<AppIcon name="calendar" className="h-4 w-4" />}
-                action={
-                  nextAbsence ? (
-                    <span
-                      className={`rounded-full border px-2.5 py-1 text-[11px] ${
-                        nextAbsence.status === "aprobado"
-                          ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
-                          : "border-amber-400/30 bg-amber-400/10 text-amber-200"
-                      }`}
-                    >
-                      {nextAbsence.status === "aprobado" ? "Aprobada" : "Pendiente"}
-                    </span>
-                  ) : null
-                }
+          <div className="lll-fade-in space-y-4">
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-12 xl:items-start">
+              <UserDashboardSidebar
+                pendingCount={myPendingCount}
+                vacationAvailable={vacationAvailable}
+                hasVacationBalance={Boolean(vacDb)}
+                birthdays={upcomingBirthdays}
               >
-                {nextAbsence ? (
-                  <div className="rounded-xl border border-lll-border bg-lll-bg-softer p-3.5">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold">
-                          {getAbsenceTypeLabel(nextAbsence.type, nextAbsence.subtype ?? null)}
-                        </p>
-                        <p className="mt-1.5 flex items-center gap-2 text-[12px] text-lll-text-soft">
-                          <AppIcon name="calendar" className="h-3.5 w-3.5 shrink-0" />
-                          <span>
-                            {formatAR(nextAbsence.from)}
-                            {nextAbsence.to !== nextAbsence.from ? ` → ${formatAR(nextAbsence.to)}` : ""}
-                          </span>
-                        </p>
-                        {nextAbsenceTimeRange ? (
-                          <p className="mt-1.5 flex items-center gap-2 text-[12px] text-lll-text-soft">
-                            <AppIcon name="clock" className="h-3.5 w-3.5 shrink-0" />
-                            <span>{nextAbsenceTimeRange}</span>
-                          </p>
-                        ) : null}
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-dashed border-lll-border bg-lll-bg-softer px-4 py-6 text-center">
-                    <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl border border-lll-border bg-lll-bg text-cyan-300">
-                      <AppIcon name="check" className="h-5 w-5" />
-                    </div>
-                    <p className="mt-3 text-sm font-medium">Agenda despejada</p>
-                    <p className="mt-1 text-[12px] text-lll-text-soft">No tenés ausencias próximas.</p>
-                  </div>
-                )}
-              </SectionCard>
+                <AbsenceList
+                  absences={myAbsences}
+                  onEdit={openEdit}
+                  focusId={focusId}
+                  collapsible
+                  defaultOpen={false}
+                />
+              </UserDashboardSidebar>
+
+              <div className="xl:col-span-8">
+                <CalendarMonth
+                  title="Tu calendario"
+                  absences={myAbsences}
+                  birthdays={teamBirthdays}
+                  viewYear={viewYear}
+                  viewMonth={viewMonth}
+                  onPrevMonth={goPrevMonth}
+                  onNextMonth={goNextMonth}
+                  onToday={goToday}
+                />
+              </div>
             </div>
 
-            <div className="xl:col-span-8">
-              <CalendarMonth
-                title="Tu calendario"
-                absences={myAbsences}
-                viewYear={viewYear}
-                viewMonth={viewMonth}
-                onPrevMonth={goPrevMonth}
-                onNextMonth={goNextMonth}
-                onToday={goToday}
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:items-stretch">
+              <VacationBalanceCard
+                data={vacDb}
+                loading={vacDbLoading}
+                error={vacDbError}
+                className="h-full"
               />
+              <NextAbsenceCard absence={nextAbsence} />
             </div>
           </div>
         )}

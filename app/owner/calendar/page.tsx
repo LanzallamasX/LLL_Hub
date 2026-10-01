@@ -5,8 +5,11 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 
 import UserLayout from "@/components/layout/UserLayout";
-import CalendarMonth from "@/components/dashboard/CalendarMonth";
+import CalendarMonth, {
+  type BirthdayCalendarItem,
+} from "@/components/dashboard/CalendarMonth";
 import CalendarSkeleton from "@/components/dashboard/CalendarSkeleton";
+import BirthdayNotificationsTestCard from "@/components/dashboard/BirthdayNotificationsTestCard";
 import { AppIcon } from "@/components/ui/AppIcon";
 import { EmptyState } from "@/components/ui/EmptyState";
 import {
@@ -21,6 +24,7 @@ import { getAbsenceTypeLabel } from "@/lib/absenceTypes";
 import { getAbsenceTimeRangeLabel } from "@/lib/absences/timeRange";
 import { formatAR, toDate00 } from "@/lib/date";
 import type { Absence } from "@/lib/supabase/absences";
+import { listProfiles, type ProfileRow } from "@/lib/supabase/profilesAdmin";
 
 function isDateInRange(day: Date, fromISO: string, toISO: string) {
   const from = toDate00(fromISO).getTime();
@@ -33,6 +37,12 @@ function isDateInRange(day: Date, fromISO: string, toISO: string) {
   return timestamp >= from && timestamp <= to;
 }
 
+function isISODate(value: string | null): value is string {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
 function getInitials(name?: string | null) {
   return (name?.trim() || "Usuario")
     .split(/\s+/)
@@ -40,6 +50,30 @@ function getInitials(name?: string | null) {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase())
     .join("");
+}
+
+function getProfileName(profile: ProfileRow) {
+  return (
+    profile.full_name?.trim() ||
+    `${profile.first_name ?? ""} ${profile.last_name ?? ""}`.trim() ||
+    profile.email?.trim() ||
+    "Sin nombre"
+  );
+}
+
+function nextBirthdayDate(birthDate: string, from: Date) {
+  const [, monthText, dayText] = birthDate.split("-");
+  const month = Number(monthText);
+  const day = Number(dayText);
+  if (!month || !day) return null;
+
+  const start = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  for (let year = start.getFullYear(); year <= start.getFullYear() + 4; year += 1) {
+    const candidate = new Date(year, month - 1, day);
+    if (candidate.getMonth() !== month - 1 || candidate.getDate() !== day) continue;
+    if (candidate >= start) return candidate;
+  }
+  return null;
 }
 
 function AbsenceMiniRow({
@@ -90,12 +124,118 @@ function AbsenceMiniRow({
   );
 }
 
+function OperationalOverview({
+  outToday,
+  outTomorrow,
+  next7,
+  wide = false,
+}: {
+  outToday: Absence[];
+  outTomorrow: Absence[];
+  next7: Array<{ date: Date; total: number; pending: number }>;
+  wide?: boolean;
+}) {
+  return (
+    <div
+      className={
+        wide
+          ? "grid grid-cols-1 gap-4 md:grid-cols-2 md:items-start"
+          : "space-y-4"
+      }
+    >
+      <SectionCard
+        title="Hoy"
+        description="Personas ausentes durante el día."
+        icon={<AppIcon name="person" className="h-4 w-4" />}
+        action={<SummaryChip>{outToday.length} fuera</SummaryChip>}
+      >
+        <div className="space-y-2">
+          {outToday.slice(0, 6).map((absence) => (
+            <AbsenceMiniRow key={absence.id} absence={absence} />
+          ))}
+          {outToday.length === 0 ? (
+            <EmptyState
+              icon={<AppIcon name="calendar" className="h-5 w-5" />}
+              title="Equipo completo"
+              description="No hay ausencias registradas para hoy."
+              className="py-6"
+            />
+          ) : null}
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Mañana"
+        description="Una vista rápida del próximo día."
+        icon={<AppIcon name="arrowRight" className="h-4 w-4" />}
+        action={<SummaryChip>{outTomorrow.length} fuera</SummaryChip>}
+      >
+        <div className="space-y-2">
+          {outTomorrow.slice(0, 6).map((absence) => (
+            <AbsenceMiniRow key={absence.id} absence={absence} />
+          ))}
+          {outTomorrow.length === 0 ? (
+            <EmptyState
+              icon={<AppIcon name="calendar" className="h-5 w-5" />}
+              title="Sin ausencias"
+              description="No hay personas fuera mañana."
+              className="py-6"
+            />
+          ) : null}
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Próximos 7 días"
+        description="Cantidad de personas fuera por jornada."
+        icon={<AppIcon name="calendar" className="h-4 w-4" />}
+        className={wide ? "md:col-span-2" : ""}
+      >
+        <div className={wide ? "grid grid-cols-1 gap-2 sm:grid-cols-2" : "space-y-2"}>
+          {next7.map((day) => (
+            <div
+              key={day.date.toISOString()}
+              className="flex items-center justify-between rounded-xl border border-lll-border bg-lll-bg-softer px-3 py-2.5"
+            >
+              <span className="text-[12px] capitalize text-lll-text">
+                {day.date.toLocaleDateString("es-AR", {
+                  weekday: "short",
+                  day: "2-digit",
+                  month: "short",
+                })}
+              </span>
+              <div className="flex items-center gap-2">
+                {day.pending > 0 ? (
+                  <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[10px] text-amber-200">
+                    {day.pending} pendientes
+                  </span>
+                ) : null}
+                <span className="min-w-6 rounded-full border border-lll-border bg-lll-bg px-2 py-0.5 text-center text-[10px] text-lll-text-soft">
+                  {day.total}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </SectionCard>
+    </div>
+  );
+}
+
 export default function OwnerCalendarPage() {
   const router = useRouter();
   const pathname = usePathname();
   const isDashboard = pathname.startsWith("/owner/dashboard");
-  const { userId, isAuthed, role, isLoading } = useAuth();
+  const { userId, email, isAuthed, role, isLoading } = useAuth();
   const { absences, loadAllAbsences, hasLoadedAllAbsences, error } = useAbsences();
+  const [profiles, setProfiles] = useState<ProfileRow[]>([]);
+  const [profilesLoading, setProfilesLoading] = useState(true);
+  const [profilesError, setProfilesError] = useState<string | null>(null);
+  const [birthdayAt] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    const requestedDate = new URLSearchParams(window.location.search).get("birthdayAt");
+    return isISODate(requestedDate) ? requestedDate : null;
+  });
 
   const [{ year: viewYear, month: viewMonth }, setViewDate] = useState(() => {
     const now = new Date();
@@ -123,7 +263,7 @@ export default function OwnerCalendarPage() {
     setViewDate({ year: now.getFullYear(), month: now.getMonth() });
   }
 
-  const calendarLoaded = hasLoadedAllAbsences;
+  const calendarLoaded = hasLoadedAllAbsences && !profilesLoading;
 
   useEffect(() => {
     if (isLoading) return;
@@ -139,10 +279,58 @@ export default function OwnerCalendarPage() {
     }
 
     void loadAllAbsences();
+    let active = true;
+    listProfiles()
+      .then((rows) => {
+        if (active) setProfiles(rows);
+      })
+      .catch((profileError: unknown) => {
+        if (!active) return;
+        const message =
+          profileError &&
+          typeof profileError === "object" &&
+          "message" in profileError
+            ? String(profileError.message)
+            : "No se pudieron cargar los cumpleaños.";
+        setProfilesError(message);
+      })
+      .finally(() => {
+        if (active) setProfilesLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
   }, [isLoading, isAuthed, userId, role, router, loadAllAbsences]);
 
   const teamAbsences = useMemo(() => absences, [absences]);
   const today = useMemo(() => new Date(), []);
+
+  const birthdays = useMemo<BirthdayCalendarItem[]>(
+    () =>
+      profiles
+        .filter((profile) => profile.active && profile.birth_date)
+        .map((profile) => ({
+          id: profile.id,
+          name: getProfileName(profile),
+          birthDate: profile.birth_date as string,
+        })),
+    [profiles]
+  );
+
+  const upcomingBirthdays = useMemo(() => {
+    const horizon = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 45);
+    return birthdays
+      .map((birthday) => ({
+        ...birthday,
+        nextDate: nextBirthdayDate(birthday.birthDate, today),
+      }))
+      .filter(
+        (birthday): birthday is BirthdayCalendarItem & { nextDate: Date } =>
+          birthday.nextDate !== null && birthday.nextDate <= horizon
+      )
+      .sort((left, right) => left.nextDate.getTime() - right.nextDate.getTime());
+  }, [birthdays, today]);
 
   const pending = useMemo(
     () => teamAbsences.filter((absence) => absence.status === "pendiente"),
@@ -245,6 +433,7 @@ export default function OwnerCalendarPage() {
                 <SummaryChip>{outToday.length} fuera hoy</SummaryChip>
                 <SummaryChip>{outTomorrow.length} fuera mañana</SummaryChip>
                 <SummaryChip>{pending.length} pendientes</SummaryChip>
+                <SummaryChip>{upcomingBirthdays.length} cumpleaños próximos</SummaryChip>
               </>
             ) : (
               <SummaryChip>Cargando calendario…</SummaryChip>
@@ -266,15 +455,21 @@ export default function OwnerCalendarPage() {
             {error}
           </div>
         ) : null}
+        {profilesError ? (
+          <div role="alert" className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+            {profilesError}
+          </div>
+        ) : null}
 
         {!calendarLoaded ? (
           <CalendarSkeleton calendarRight={isDashboard} />
         ) : (
           <div className="lll-fade-in grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <div className={`lg:col-span-2 ${isDashboard ? "order-2" : "order-1"}`}>
+            <div className={`space-y-4 lg:col-span-2 ${isDashboard ? "order-2" : "order-1"}`}>
               <CalendarMonth
                 title="Calendario del equipo"
                 absences={teamAbsences}
+                birthdays={birthdays}
                 viewYear={viewYear}
                 viewMonth={viewMonth}
                 onPrevMonth={goPrevMonth}
@@ -282,9 +477,70 @@ export default function OwnerCalendarPage() {
                 onToday={goToday}
                 mode="owner"
               />
+
+              {!isDashboard ? (
+                <OperationalOverview
+                  outToday={outToday}
+                  outTomorrow={outTomorrow}
+                  next7={next7}
+                  wide
+                />
+              ) : null}
             </div>
 
             <aside className={`space-y-4 lg:col-span-1 ${isDashboard ? "order-1" : "order-2"}`}>
+              <SectionCard
+                title="Próximos cumpleaños"
+                description="Cumpleaños del equipo durante los próximos 45 días."
+                icon={<AppIcon name="calendar" className="h-4 w-4" />}
+                action={<SummaryChip>{upcomingBirthdays.length}</SummaryChip>}
+              >
+                <div className="space-y-2">
+                  {upcomingBirthdays.slice(0, 6).map((birthday) => (
+                    <div
+                      key={birthday.id}
+                      className="flex items-center justify-between gap-3 rounded-xl border border-fuchsia-400/20 bg-fuchsia-500/[0.055] p-3"
+                    >
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-fuchsia-400/30 bg-fuchsia-500/10 text-lg">
+                          🎂
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-lll-text">
+                            {birthday.name}
+                          </p>
+                          <p className="text-[11px] capitalize text-lll-text-soft">
+                            {birthday.nextDate.toLocaleDateString("es-AR", {
+                              weekday: "short",
+                              day: "2-digit",
+                              month: "short",
+                            })}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {upcomingBirthdays.length === 0 ? (
+                    <EmptyState
+                      icon={<AppIcon name="calendar" className="h-5 w-5" />}
+                      title="Sin cumpleaños cercanos"
+                      description="No hay cumpleaños cargados para los próximos 45 días."
+                      className="py-6"
+                    />
+                  ) : null}
+                </div>
+              </SectionCard>
+
+              {!isDashboard && birthdayAt ? (
+                <BirthdayNotificationsTestCard
+                  profiles={profiles}
+                  defaultEmail={email}
+                  simulatedDate={birthdayAt}
+                  defaultOpen
+                  lockEmail
+                />
+              ) : null}
+
               <SectionCard
                 title="Pendientes"
                 description="Solicitudes que todavía requieren una decisión."
@@ -310,80 +566,13 @@ export default function OwnerCalendarPage() {
                 </div>
               </SectionCard>
 
-              <SectionCard
-                title="Hoy"
-                description="Personas ausentes durante el día."
-                icon={<AppIcon name="person" className="h-4 w-4" />}
-                action={<SummaryChip>{outToday.length} fuera</SummaryChip>}
-              >
-                <div className="space-y-2">
-                  {outToday.slice(0, 6).map((absence) => (
-                    <AbsenceMiniRow key={absence.id} absence={absence} />
-                  ))}
-                  {outToday.length === 0 ? (
-                    <EmptyState
-                      icon={<AppIcon name="calendar" className="h-5 w-5" />}
-                      title="Equipo completo"
-                      description="No hay ausencias registradas para hoy."
-                      className="py-6"
-                    />
-                  ) : null}
-                </div>
-              </SectionCard>
-
-              <SectionCard
-                title="Mañana"
-                description="Una vista rápida del próximo día."
-                icon={<AppIcon name="arrowRight" className="h-4 w-4" />}
-                action={<SummaryChip>{outTomorrow.length} fuera</SummaryChip>}
-              >
-                <div className="space-y-2">
-                  {outTomorrow.slice(0, 6).map((absence) => (
-                    <AbsenceMiniRow key={absence.id} absence={absence} />
-                  ))}
-                  {outTomorrow.length === 0 ? (
-                    <EmptyState
-                      icon={<AppIcon name="calendar" className="h-5 w-5" />}
-                      title="Sin ausencias"
-                      description="No hay personas fuera mañana."
-                      className="py-6"
-                    />
-                  ) : null}
-                </div>
-              </SectionCard>
-
-              <SectionCard
-                title="Próximos 7 días"
-                description="Cantidad de personas fuera por jornada."
-                icon={<AppIcon name="calendar" className="h-4 w-4" />}
-              >
-                <div className="space-y-2">
-                  {next7.map((day) => (
-                    <div
-                      key={day.date.toISOString()}
-                      className="flex items-center justify-between rounded-xl border border-lll-border bg-lll-bg-softer px-3 py-2.5"
-                    >
-                      <span className="text-[12px] capitalize text-lll-text">
-                        {day.date.toLocaleDateString("es-AR", {
-                          weekday: "short",
-                          day: "2-digit",
-                          month: "short",
-                        })}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        {day.pending > 0 ? (
-                          <span className="rounded-full border border-amber-400/30 bg-amber-400/10 px-2 py-0.5 text-[10px] text-amber-200">
-                            {day.pending} pendientes
-                          </span>
-                        ) : null}
-                        <span className="min-w-6 rounded-full border border-lll-border bg-lll-bg px-2 py-0.5 text-center text-[10px] text-lll-text-soft">
-                          {day.total}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </SectionCard>
+              {isDashboard ? (
+                <OperationalOverview
+                  outToday={outToday}
+                  outTomorrow={outTomorrow}
+                  next7={next7}
+                />
+              ) : null}
             </aside>
           </div>
         )}
