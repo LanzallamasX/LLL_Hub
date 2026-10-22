@@ -42,6 +42,7 @@ export type AbsenceRow = {
   hours?: number | null;
   time_from?: string | null;
   time_to?: string | null;
+  prescription_path?: string | null;
   notifyOwnerIds?: string[];
 };
 
@@ -67,6 +68,7 @@ export type Absence = {
   hours?: number | null;
   timeFrom?: string | null;
   timeTo?: string | null;
+  prescriptionPath?: string | null;
   notifyOwnerIds?: string[];
 };
 
@@ -83,6 +85,7 @@ export type CreateAbsenceInput = {
   hours?: number | null;
   timeFrom?: string | null;
   timeTo?: string | null;
+  prescriptionPath?: string | null;
   notifyOwnerIds?: string[];
 };
 
@@ -97,6 +100,7 @@ export type UpdateAbsenceInput = {
   hours?: number | null;
   timeFrom?: string | null;
   timeTo?: string | null;
+  prescriptionPath?: string | null;
 };
 
 export function mapRowToAbsence(
@@ -116,6 +120,7 @@ export function mapRowToAbsence(
     hours: r.hours ?? null,
     timeFrom: r.time_from ?? null,
     timeTo: r.time_to ?? null,
+    prescriptionPath: r.prescription_path ?? null,
 
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -162,6 +167,7 @@ export async function createAbsence(input: CreateAbsenceInput): Promise<Absence>
     hours: input.hours ?? null,
     time_from: input.timeFrom ?? null,
     time_to: input.timeTo ?? null,
+    prescription_path: input.prescriptionPath ?? null,
   };
 
   if (input.notifyOwnerIds?.length) {
@@ -306,6 +312,7 @@ export async function updateAbsence(id: string, input: UpdateAbsenceInput): Prom
       hours: input.hours ?? null,
       time_from: input.timeFrom ?? null,
       time_to: input.timeTo ?? null,
+    prescription_path: input.prescriptionPath ?? null,
     })
     .eq("id", id)
     .select(ABSENCE_SELECT_WITH_DECIDER)

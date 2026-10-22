@@ -420,6 +420,7 @@ const [startDateISO, setStartDateISO] = useState<string | null>(null);
         hours: payload.hours ?? null,
         timeFrom: payload.timeFrom ?? null,
         timeTo: payload.timeTo ?? null,
+      prescriptionPath: payload.prescriptionPath ?? null,
       });
       
 
@@ -444,6 +445,7 @@ const [startDateISO, setStartDateISO] = useState<string | null>(null);
         hours: payload.hours ?? null,
         timeFrom: payload.timeFrom ?? null,
         timeTo: payload.timeTo ?? null,
+      prescriptionPath: payload.prescriptionPath ?? null,
         notifyOwnerIds: payload.notifyOwnerIds ?? [],
       });
     }
@@ -578,6 +580,7 @@ const [startDateISO, setStartDateISO] = useState<string | null>(null);
           hours: editing.hours ?? null,
           timeFrom: editing.timeFrom ?? null,
           timeTo: editing.timeTo ?? null,
+                prescriptionPath: editing.prescriptionPath ?? null,
         }
       : undefined
   }

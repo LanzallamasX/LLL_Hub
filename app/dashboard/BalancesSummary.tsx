@@ -62,6 +62,8 @@ function labelForKey(key: BalanceKey) {
       return "Razones particulares (LCT)";
     case "LIC_PERSONAL_TRAMITE_HOURS":
       return "Trámite personal";
+    case "LIC_PROLONGED_HEALTH_HOURS":
+      return "Tratamiento de salud prolongado";
     case "LIC_MEDICAL_APPT_HOURS":
       return "Turno médico";
     default:

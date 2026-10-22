@@ -311,6 +311,7 @@ async function handleSubmit(payload: NewAbsencePayload) {
       hours: payload.hours ?? null,
       timeFrom: payload.timeFrom ?? null,
       timeTo: payload.timeTo ?? null,
+      prescriptionPath: payload.prescriptionPath ?? null,
     });
 
     await refreshAll({ forceAbsences: true });
@@ -335,6 +336,7 @@ async function handleSubmit(payload: NewAbsencePayload) {
       hours: payload.hours ?? null,
       timeFrom: payload.timeFrom ?? null,
       timeTo: payload.timeTo ?? null,
+      prescriptionPath: payload.prescriptionPath ?? null,
       notifyOwnerIds: payload.notifyOwnerIds ?? [],
     });
   }
@@ -490,6 +492,7 @@ async function handleSubmit(payload: NewAbsencePayload) {
                 hours: editing.hours ?? null,
                 timeFrom: editing.timeFrom ?? null,
                 timeTo: editing.timeTo ?? null,
+                prescriptionPath: editing.prescriptionPath ?? null,
               }
             : undefined
         }

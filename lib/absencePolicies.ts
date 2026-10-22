@@ -14,6 +14,7 @@ export type BalanceKey =
   | "LIC_MOVING_DAYS"
   | "LIC_LCT_PERSONAL_DAYS"
   | "LIC_PERSONAL_TRAMITE_HOURS"
+  | "LIC_PROLONGED_HEALTH_HOURS"
   | "LIC_MEDICAL_APPT_HOURS";
 
 export type AbsenceType =
@@ -34,6 +35,7 @@ export type LicenseSubtype =
   | "MUDANZA"
   | "RAZONES_PARTICULARES_LCT"
   | "TRAMITE_PERSONAL"
+  | "TRATAMIENTO_SALUD_PROLONGADO"
   | "TURNO_MEDICO";
 
 export type Policy = {
@@ -57,6 +59,7 @@ export const POLICIES: Policy[] = [
   { key: "ENFERMEDAD", type: "enfermedad", unit: "day", allowance: null, deducts: false },
 
   // --- LICENCIAS ---
+  { key: "LIC_PROLONGED_HEALTH", type: "licencia", subtype: "TRATAMIENTO_SALUD_PROLONGADO", unit: "hour", allowance: 24, deducts: true, deductsFrom: "LIC_PROLONGED_HEALTH_HOURS" },
   { key: "LIC_MEDICAL", type: "licencia", subtype: "TURNO_MEDICO", unit: "hour", allowance: 6, deducts: true, deductsFrom: "LIC_MEDICAL_APPT_HOURS" },
   { key: "LIC_BDAY_FREE", type: "licencia", subtype: "CUMPLEANIOS_LIBRE", unit: "day", allowance: 1, deducts: true, deductsFrom: "BIRTHDAY_DAY" },
   { key: "LIC_FAMILY_CARE", type: "licencia", subtype: "ATENCION_GRUPO_FAMILIAR", unit: "day", allowance: 20, deducts: true, deductsFrom: "LIC_FAMILY_CARE_DAYS" },

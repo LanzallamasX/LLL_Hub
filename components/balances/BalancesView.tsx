@@ -663,7 +663,7 @@ export default function BalancesView({
                       <div className="text-right shrink-0">
                         <p className="text-[11px] text-lll-text-soft">Disponible</p>
                         <p className="text-[clamp(1.125rem,4vw,1.25rem)] font-bold leading-none">
-                          {s.available == null ? "—" : s.available}
+                          {s.available == null ? "—" : s.available}{s.balanceKey === "LIC_PROLONGED_HEALTH_HOURS" && s.used + s.reserved > 24 ? <span className="block text-red-300 text-xs">{`Superaste el cupo de referencia por ${s.used + s.reserved - 24} horas. Las horas adicionales quedan sujetas a aprobación.`}</span> : null}
                           {s.allowance == null ? null : (
                             <span className="ml-1 text-[12px] font-semibold text-lll-text-soft">
                               {unit}

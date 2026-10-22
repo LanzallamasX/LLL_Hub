@@ -44,6 +44,7 @@ export function getAbsenceTypeLabel(type: AbsenceTypeId, subtype?: LicenseSubtyp
 
 export function getLicenseSubtypeLabel(subtype: LicenseSubtype) {
   switch (subtype) {
+    case "TRATAMIENTO_SALUD_PROLONGADO": return "Tratamiento de salud prolongado";
     case "TURNO_MEDICO": return "Turno médico";
     case "TRAMITE_PERSONAL": return "Trámite personal";    
     case "RAZONES_PARTICULARES_LCT": return "Razones particulares (LCT)";

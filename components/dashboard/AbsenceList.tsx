@@ -1,4 +1,5 @@
 "use client";
+import PrescriptionLink from "./PrescriptionLink";
 
 import { useEffect, useState } from "react";
 
@@ -241,6 +242,7 @@ async function onDelete(a: Absence) {
 
               </div>
 
+              {a.prescriptionPath ? <PrescriptionLink path={a.prescriptionPath} /> : null}
               <AbsenceConversation absence={a} defaultOpen={focusId === a.id} />
             </div>
           );

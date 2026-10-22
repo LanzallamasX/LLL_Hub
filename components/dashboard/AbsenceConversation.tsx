@@ -25,6 +25,7 @@ import { AppIcon } from "@/components/ui/AppIcon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { useBodyScrollLock } from "@/components/ui/useBodyScrollLock";
 import { usePresence } from "@/components/ui/usePresence";
+import PrescriptionPreview from "./PrescriptionPreview";
 
 type Props = {
   absence: Absence;
@@ -109,7 +110,8 @@ export default function AbsenceConversation({ absence, defaultOpen = false }: Pr
     () => fullName || email || "Usuario",
     [fullName, email]
   );
-  const visibleCount = messages.length + (absence.note ? 1 : 0);
+  const hasOriginalMessage = Boolean(absence.note || absence.prescriptionPath);
+  const visibleCount = messages.length + (hasOriginalMessage ? 1 : 0);
   const typeLabel = getAbsenceTypeLabel(absence.type, absence.subtype ?? null);
   const timeRangeLabel = getAbsenceTimeRangeLabel(absence);
   const status = statusMeta(absence.status);
@@ -364,7 +366,7 @@ export default function AbsenceConversation({ absence, defaultOpen = false }: Pr
                 className="min-h-0 flex-1 space-y-3 overflow-y-auto bg-lll-bg/55 px-4 py-5 overscroll-contain sm:px-5"
                 aria-live="polite"
               >
-                {absence.note ? (
+                {hasOriginalMessage ? (
                   <div className={`flex ${initialIsMine ? "justify-end" : "justify-start"}`}>
                     <div
                       className={`max-w-[88%] rounded-2xl border px-3.5 py-3 sm:max-w-[78%] ${
@@ -382,9 +384,10 @@ export default function AbsenceConversation({ absence, defaultOpen = false }: Pr
                           Solicitud original
                         </span>
                       </div>
-                      <p className="mt-2 whitespace-pre-wrap text-sm leading-5 text-lll-text">
+                      {absence.note ? <p className="mt-2 whitespace-pre-wrap text-sm leading-5 text-lll-text">
                         {absence.note}
-                      </p>
+                      </p> : null}
+                      {absence.prescriptionPath ? <PrescriptionPreview key={absence.prescriptionPath} path={absence.prescriptionPath} /> : null}
                       <p className="mt-2 text-right text-[10px] text-lll-text-soft">
                         {formatARDateTime(absence.createdAt)}
                       </p>
@@ -406,7 +409,7 @@ export default function AbsenceConversation({ absence, defaultOpen = false }: Pr
                   </div>
                 ) : null}
 
-                {!loading && !absence.note && messages.length === 0 ? (
+                {!loading && !hasOriginalMessage && messages.length === 0 ? (
                   <div className="flex min-h-48 flex-col items-center justify-center px-6 text-center">
                     <span className="flex h-12 w-12 items-center justify-center rounded-2xl border border-lll-border bg-lll-bg-soft text-lll-accent-alt">
                       <AppIcon name="note" className="h-5 w-5" />

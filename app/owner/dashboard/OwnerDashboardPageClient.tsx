@@ -15,6 +15,7 @@ import {
 import { SearchField } from "@/components/ui/SearchField";
 import { SectionCard } from "@/components/ui/SectionCard";
 import AbsenceConversation from "@/components/dashboard/AbsenceConversation";
+import PrescriptionLink from "@/components/dashboard/PrescriptionLink";
 import { useAbsences } from "@/contexts/AbsencesContext";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -436,6 +437,7 @@ export default function OwnerDashboardPageClient() {
                 </div>
               </div>
 
+              {a.prescriptionPath ? <PrescriptionLink path={a.prescriptionPath} /> : null}
               <AbsenceConversation absence={a} defaultOpen={focusId === a.id} />
             </div>
           );

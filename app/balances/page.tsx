@@ -658,7 +658,7 @@ export default function BalancesPage() {
                       <div className="shrink-0 text-right">
                         <p className="text-[10px] uppercase tracking-[0.08em] text-lll-text-soft">Disponible</p>
                         <p className="mt-1 text-lg font-semibold leading-none text-emerald-200">
-                          {s.available == null ? "—" : s.available}
+                          {s.available == null ? "—" : s.available}{s.balanceKey === "LIC_PROLONGED_HEALTH_HOURS" && s.used + s.reserved > 24 ? <span className="block text-red-300 text-xs">{`Superaste el cupo de referencia por ${s.used + s.reserved - 24} horas. Las horas adicionales quedan sujetas a aprobación.`}</span> : null}
                           {s.allowance == null ? null : (
                             <span className="ml-1 text-[10px] font-medium text-lll-text-soft">
                               {unit}

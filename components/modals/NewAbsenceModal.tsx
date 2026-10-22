@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { uploadPrescription } from "@/lib/supabase/prescriptions";
 import { prettySupabaseError } from "@/lib/supabase/errors";
 
 import {
@@ -40,6 +41,7 @@ export type NewAbsencePayload = {
   dates?: string[];
   type: AbsenceTypeId;
   note?: string;
+  prescriptionPath?: string | null;
 
   subtype?: LicenseSubtype | null;
   hours?: number | null;
@@ -91,6 +93,7 @@ type Props = {
 
 const LICENSE_SUBTYPES: readonly LicenseSubtype[] = [
   "TURNO_MEDICO",
+  "TRATAMIENTO_SALUD_PROLONGADO",
   "CUMPLEANIOS_LIBRE",
   "TRAMITE_PERSONAL",
   "ATENCION_GRUPO_FAMILIAR",
@@ -258,6 +261,10 @@ export default function NewAbsenceModal({
   const typeDef = useMemo(() => getAbsenceType(type), [type]);
   const isVacation = type === "vacaciones";
   const isLicense = type === "licencia";
+  const isProlongedHealth = isLicense && subtype === "TRATAMIENTO_SALUD_PROLONGADO";
+  const [prescription, setPrescription] = useState<File | null>(null);
+  const [prescriptionPath, setPrescriptionPath] = useState(initial?.prescriptionPath ?? null);
+  const prescriptionInputRef = useRef<HTMLInputElement>(null);
   const showNotificationSelector = !ignoreAbsenceId;
 
   const policy = useMemo(() => {
@@ -503,8 +510,8 @@ export default function NewAbsenceModal({
 
   const hoursOk = useMemo(() => {
     if (!isHourUnit) return true;
-    return timeRange.valid;
-  }, [isHourUnit, timeRange.valid]);
+    return timeRange.valid && (!isProlongedHealth || timeRange.durationMinutes <= 120);
+  }, [isHourUnit, isProlongedHealth, timeRange.valid, timeRange.durationMinutes]);
 
   const licenseSubtypeOk = useMemo(() => {
     if (!isLicense) return true;
@@ -525,7 +532,8 @@ export default function NewAbsenceModal({
     if (isVacation && exceedsAvailable) return false;
     if (!licenseSubtypeOk) return false;
     if (!hoursOk) return false;
-    if (!isVacation && exceedsPolicyAvailable) return false;
+    if (!isVacation && exceedsPolicyAvailable && !isProlongedHealth) return false;
+    if (isProlongedHealth && !prescription && !prescriptionPath) return false;
     if (!notificationRecipientsOk) return false;
     return true;
   }, [
@@ -539,6 +547,7 @@ export default function NewAbsenceModal({
     hoursOk,
     exceedsPolicyAvailable,
     notificationRecipientsOk,
+    isProlongedHealth, prescription, prescriptionPath,
   ]);
 
   useEffect(() => {
@@ -562,6 +571,8 @@ export default function NewAbsenceModal({
     setTimeTo(normalizeTime(initial?.timeTo));
     setSelectedOwnerIds(initial?.notifyOwnerIds ?? []);
 
+    setPrescription(null);
+    setPrescriptionPath(initial?.prescriptionPath ?? null);
     setSubmitError("");
     setIsSubmitting(false);
   }, [
@@ -576,6 +587,7 @@ export default function NewAbsenceModal({
     initial?.timeFrom,
     initial?.timeTo,
     initial?.notifyOwnerIds,
+    initial?.prescriptionPath,
   ]);
 
   useEffect(() => {
@@ -677,6 +689,10 @@ export default function NewAbsenceModal({
     };
 
     try {
+      payload.prescriptionPath = isProlongedHealth
+        ? prescription ? await uploadPrescription(prescription) : prescriptionPath
+        : null;
+      if (payload.prescriptionPath) { setPrescriptionPath(payload.prescriptionPath); setPrescription(null); }
       await onSubmit(payload);
       onClose();
     } catch (err: unknown) {
@@ -829,12 +845,16 @@ export default function NewAbsenceModal({
                       </span>
                     </>
                   }
-                  right={exceedsPolicyAvailable ? <span>Te pasás del disponible</span> : null}
+                  right={exceedsPolicyAvailable ? <span className="text-red-300">{isProlongedHealth ? `Con esta solicitud superarías el cupo por ${fmt2(Math.max(0, usage.used + usage.reserved + timeRange.durationHours - usage.allowance))} horas. Podés enviarla para evaluación.` : 'Superás el disponible'}</span> : null}
                 />
               </div>
             ) : null}
           </div>
 
+          {isProlongedHealth ? <div className="rounded-2xl border border-lll-border p-4 space-y-3">
+            <p>Antes de solicitarla, adjuntá una foto legible de la prescripción médica con firma y sello. Cupo de referencia: 24 horas anuales, ampliable para evaluación. Podés solicitar el tiempo que necesites, hasta 2 horas por día (por ejemplo, 30 minutos o 1 hora).</p>
+            {timeRange.complete && (!timeRange.valid || timeRange.durationMinutes > 120) ? <p className="text-red-300">Elegí un horario de duración mayor a cero y de hasta 2 horas por día.</p> : null}
+          </div> : null}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
             <div className="space-y-4">
               <div className="rounded-2xl border border-lll-border bg-lll-bg-softer p-4">
@@ -1114,6 +1134,41 @@ export default function NewAbsenceModal({
                     setSubmitError("");
                   }}
                 />
+                {isProlongedHealth ? (
+                  <div className="mt-3 space-y-3 border-t border-lll-border pt-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-[12px] font-medium text-lll-text">Prescripción médica <span className="text-lll-text-soft">· Obligatoria</span></span>
+                      <button
+                        type="button"
+                        disabled={isSubmitting}
+                        onClick={() => prescriptionInputRef.current?.click()}
+                        className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-lll-accent-alt/40 bg-lll-accent-alt/10 px-3 py-2 text-[12px] font-semibold text-lll-text transition hover:bg-lll-accent-alt/20 focus-visible:outline-2 focus-visible:outline-lll-accent-alt disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <AppIcon name={prescription || prescriptionPath ? "edit" : "plus"} className="h-4 w-4 text-lll-accent-alt" />
+                        {prescription || prescriptionPath ? "Cambiar foto" : "Adjuntar prescripción"}
+                      </button>
+                    </div>
+                    <input ref={prescriptionInputRef} className="hidden" type="file" accept="image/jpeg,image/png,image/webp" aria-label="Foto de la prescripción médica" disabled={isSubmitting} onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (!file) return;
+                      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size === 0 || file.size > 10485760) {
+                        setSubmitError('Elegí una foto JPG, PNG o WebP de hasta 10 MB.');
+                        event.target.value = '';
+                        return;
+                      }
+                      setPrescription(file);
+                      setSubmitError('');
+                      event.target.value = '';
+                    }} />
+                    {prescription || prescriptionPath ? (
+                      <div role="status" className="flex items-center gap-2 rounded-lg border border-lll-accent-alt/25 bg-lll-bg-soft px-3 py-2 text-[12px] text-lll-text">
+                        <AppIcon name="check" className="h-4 w-4 shrink-0 text-lll-accent-alt" />
+                        <span className="min-w-0 break-all">{prescription?.name ?? "Prescripción adjunta"}</span>
+                      </div>
+                    ) : null}
+                    <p className="text-[12px] text-lll-text-soft">Foto legible con firma y sello. JPG, PNG o WebP, hasta 10 MB. Se verá junto al mensaje en la conversación.</p>
+                  </div>
+                ) : null}
                 <p className="mt-2 text-[12px] text-lll-text-soft">Tip: agregá contexto si necesitás aprobación rápida.</p>
               </div>
 
